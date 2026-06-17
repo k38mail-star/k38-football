@@ -1,0 +1,17 @@
+[Unit]
+Description=K38 Football Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/k38-football-web
+EnvironmentFile=-/opt/k38-football-web/.env
+ExecStart=/opt/k38-football-web/.venv/bin/gunicorn -c gunicorn_config.py app:app
+Restart=on-failure
+RestartSec=5
+User=k38
+Group=k38
+
+[Install]
+WantedBy=multi-user.target

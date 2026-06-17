@@ -1,0 +1,10 @@
+/var/log/k38_football.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0640 k38 k38
+}

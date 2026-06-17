@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}K38 足球监控{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="nav-logo">⚽</span>
+            <span class="nav-title">K38 足球监控</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">仪表盘</a>
+            <a href="/standings" class="nav-link {% if request.path.startswith('/standings') %}active{% endif %}">积分榜</a>
+        </div>
+        <div class="nav-status" id="navStatus">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">加载中...</span>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        // 自动更新时间
+        function updateTimestamp() {
+            const el = document.getElementById('updateTime');
+            if (el) el.textContent = new Date().toLocaleString('zh-CN');
+        }
+        setInterval(updateTimestamp, 1000);
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

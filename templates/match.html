@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}比赛详情 — K38 足球监控{% endblock %}
+
+{% block content %}
+<div class="match-detail" id="matchDetail">
+    <div class="loading">加载中...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const fixtureId = {{ fixture_id }};
+    let liveRefreshTimer = null;
+
+    async function loadMatch() {
+        const container = document.getElementById('matchDetail');
+
+        try {
+            const resp = await fetch(`/api/match/${fixtureId}`);
+            const m = await resp.json();
+
+            if (m.error) {
+                container.innerHTML = '<div class="error-state">❌ 比赛未找到</div>';
+                stopLiveRefresh();
+                return;
+            }
+
+            const isLive = m.status_sort <= 2;
+            const isFinished = m.status_sort === 4;
+
+            document.getElementById('statusText').textContent = isLive ? '🟢 自动刷新中' : (isFinished ? '🏁 已结束' : '📋 未开始');
+            document.getElementById('statusDot').className = 'status-dot ' + (isLive ? 'green' : 'yellow');
+
+            let badge = '';
+            if (isLive) badge = `<span class="badge live-badge">🟢 ${m.elapsed}'</span>`;
+            else if (isFinished) badge = `<span class="badge finished-badge">🏁 已结束</span>`;
+            else badge = `<span class="badge upcoming-badge">📋 ${m.status || '未开始'}</span>`;
+
+            container.innerHTML = `
+                <div class="detail-header">
+                    <div class="detail-meta">
+                        <span class="detail-league">${m.league_name}</span>
+                        <span class="detail-round">${m.round || ''}</span>
+                        ${badge}
+                    </div>
+                    <div class="detail-scoreboard">
+                        <div class="detail-team home">
+                            <div class="team-name">${m.home_team}</div>
+                        </div>
+                        <div class="detail-score">
+                            <span class="big-score home ${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
+                            <span class="big-sep">:</span>
+                            <span class="big-score away ${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
+                        </div>
+                        <div class="detail-team away">
+                            <div class="team-name">${m.away_team}</div>
+                        </div>
+                    </div>
+                    ${m.latest_goal ? `<div class="detail-goal-hint">${m.latest_goal}</div>` : ''}
+                    <div class="detail-half">
+                        ${m.halftime_home !== null ? `半场 ${m.halftime_home}:${m.halftime_away}` : ''}
+                        ${m.fulltime_home !== null ? ` | 全场 ${m.fulltime_home}:${m.fulltime_away}` : ''}
+                        ${m.extra_home !== null ? ` | 加时 ${m.extra_home}:${m.extra_away}` : ''}
+                        ${m.penalty_home !== null ? ` | 点球 ${m.penalty_home}:${m.penalty_away}` : ''}
+                    </div>
+                    <div class="detail-info">
+                        <span>🏟️ ${m.venue || '未知场地'}</span>
+                        <span>👨‍⚖️ ${m.referee || '未知裁判'}</span>
+                        <span>📅 ${m.match_date ? new Date(m.match_date).toLocaleString('zh-CN') : ''}</span>
+                    </div>
+                </div>
+
+                ${m.events && m.events.length > 0 ? `
+                <div class="detail-section">
+                    <h2>⚡ 比赛事件</h2>
+                    <div class="events-list">
+                        ${m.events.map(e => `
+                            <div class="event-item">
+                                <span class="event-time">${e.time}'</span>
+                                <span class="event-icon">${e.type === 'Goal' ? '⚽' : e.type === 'Card' ? (e.detail?.includes('Yellow') ? '🟨' : '🟥') : '📌'}</span>
+                                <span class="event-team">${e.team}</span>
+                                <span class="event-player">${e.player || ''}</span>
+                                <span class="event-detail">${e.detail || ''}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>` : ''}
+
+                ${Object.keys(m.stats).length > 0 ? `
+                <div class="detail-section">
+                    <h2>📊 统计数据</h2>
+                    <div class="stats-grid">
+                        ${renderStats(m)}
+                    </div>
+                </div>` : ''}
+            `;
+
+            if (isLive) startLiveRefresh();
+            else stopLiveRefresh();
+        } catch (e) {
+            container.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    function renderStats(m) {
+        const grouped = {};
+        Object.entries(m.stats).forEach(([key, value]) => {
+            const statName = key.replace(/_\d+$/, '');
+            if (!grouped[statName]) grouped[statName] = {};
+            if (key.endsWith('_' + m.home_team_id)) grouped[statName].home = value;
+            else if (key.endsWith('_' + m.away_team_id)) grouped[statName].away = value;
+        });
+        return Object.entries(grouped).map(([name, vals]) => `
+            <div class="stat-row">
+                <span class="stat-val home">${vals.home || '—'}</span>
+                <span class="stat-name">${name}</span>
+                <span class="stat-val away">${vals.away || '—'}</span>
+            </div>
+        `).join('');
+    }
+
+    function startLiveRefresh() {
+        if (!liveRefreshTimer) {
+            liveRefreshTimer = setInterval(loadMatch, 15000);
+        }
+    }
+
+    function stopLiveRefresh() {
+        if (liveRefreshTimer) {
+            clearInterval(liveRefreshTimer);
+            liveRefreshTimer = null;
+        }
+    }
+
+    loadMatch();
+</script>
+{% endblock %}

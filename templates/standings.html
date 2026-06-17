@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}积分榜 — K38 足球监控{% endblock %}
+
+{% block content %}
+<div class="filter-bar">
+    <button class="filter-btn active" data-league="all">全部</button>
+    {% for lid, color in leagues.items() %}
+    <button class="filter-btn" data-league="{{ lid }}" style="--league-color: {{ color }}">
+        <span class="league-dot" style="background: {{ color }}"></span>
+        {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
+    </button>
+    {% endfor %}
+</div>
+
+<div class="refresh-bar">
+    <span class="update-time">更新于: <span id="updateTime">—</span></span>
+    <button class="refresh-btn" type="button" onclick="loadStandings()">🔄 刷新</button>
+</div>
+
+<div class="standings-list" id="standingsList">
+    <div class="loading">加载中...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentLeague = 'all';
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentLeague = btn.dataset.league;
+            loadStandings();
+        });
+    });
+
+    async function loadStandings() {
+        const list = document.getElementById('standingsList');
+        list.innerHTML = '<div class="loading">加载中...</div>';
+
+        try {
+            const resp = await fetch(`/api/standings?league=${currentLeague}`);
+            const data = await resp.json();
+
+            document.getElementById('statusText').textContent =
+                data.is_mock ? '🧪 模拟模式' : '📡 实时模式';
+            document.getElementById('statusDot').className =
+                'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+
+            if (data.standings.length === 0) {
+                list.innerHTML = '<div class="empty-state">📭 暂无已完赛积分数据</div>';
+                return;
+            }
+
+            list.innerHTML = data.standings.map(renderTable).join('');
+        } catch (e) {
+            list.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    function renderTable(table) {
+        return `
+            <section class="standings-card" style="border-left: 4px solid ${table.league_color}">
+                <div class="standings-header">
+                    <h1 style="color: ${table.league_color}">${table.league_name}</h1>
+                </div>
+                <div class="standings-table-wrap">
+                    <table class="standings-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>球队</th>
+                                <th>赛</th>
+                                <th>胜</th>
+                                <th>平</th>
+                                <th>负</th>
+                                <th>进</th>
+                                <th>失</th>
+                                <th>净</th>
+                                <th>分</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${table.teams.map(team => `
+                                <tr>
+                                    <td class="rank">${team.rank}</td>
+                                    <td class="team-cell">${team.team}</td>
+                                    <td>${team.played}</td>
+                                    <td>${team.wins}</td>
+                                    <td>${team.draws}</td>
+                                    <td>${team.losses}</td>
+                                    <td>${team.goals_for}</td>
+                                    <td>${team.goals_against}</td>
+                                    <td class="${team.goal_difference > 0 ? 'positive' : team.goal_difference < 0 ? 'negative' : ''}">${team.goal_difference}</td>
+                                    <td class="points">${team.points}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        `;
+    }
+
+    loadStandings();
+</script>
+{% endblock %}

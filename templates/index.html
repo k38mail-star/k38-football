@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="filter-bar">
+    <button class="filter-btn active" data-league="all">全部</button>
+    {% for lid, color in leagues.items() %}
+    <button class="filter-btn" data-league="{{ lid }}" style="--league-color: {{ color }}">
+        <span class="league-dot" style="background: {{ color }}"></span>
+        {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
+    </button>
+    {% endfor %}
+</div>
+
+<div class="status-tabs">
+    <button class="tab-btn active" data-status="all">全部</button>
+    <button class="tab-btn" data-status="live">🟢 进行中</button>
+    <button class="tab-btn" data-status="upcoming">📋 未开始</button>
+    <button class="tab-btn" data-status="finished">🏁 已结束</button>
+</div>
+
+<div class="refresh-bar">
+    <span class="update-time">更新于: <span id="updateTime">—</span></span>
+    <button class="refresh-btn" type="button" onclick="refreshData()">🔄 刷新</button>
+</div>
+
+<div class="matches-grid" id="matchesGrid">
+    <div class="loading">加载中...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentLeague = 'all';
+    let currentStatus = 'all';
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentLeague = btn.dataset.league;
+            loadMatches();
+        });
+    });
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentStatus = btn.dataset.status;
+            loadMatches();
+        });
+    });
+
+    async function loadMatches() {
+        const grid = document.getElementById('matchesGrid');
+        grid.innerHTML = '<div class="loading">加载中...</div>';
+
+        try {
+            const url = `/api/matches?league=${currentLeague}&status=${currentStatus}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+
+            document.getElementById('statusText').textContent =
+                data.is_mock ? '🧪 模拟模式' : '📡 实时模式';
+            document.getElementById('statusDot').className =
+                'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+
+            if (data.matches.length === 0) {
+                grid.innerHTML = '<div class="empty-state">📭 暂无比赛数据</div>';
+                return;
+            }
+
+            grid.innerHTML = data.matches.map(m => renderCard(m)).join('');
+        } catch (e) {
+            grid.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    function renderCard(m) {
+        const isLive = m.status_sort <= 2;
+        const isFinished = m.status_sort === 4;
+        const isUpcoming = m.status_sort === 3;
+
+        let badge = '';
+        if (isLive) badge = `<span class="badge live-badge">🟢 ${m.elapsed}'</span>`;
+        else if (isFinished) badge = `<span class="badge finished-badge">🏁 已结束</span>`;
+        else badge = `<span class="badge upcoming-badge">📋 未开始</span>`;
+
+        const scoreHtml = isUpcoming ? `
+            <div class="score-upcoming">vs</div>
+        ` : `
+            <div class="score-display">
+                <span class="score-home ${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
+                <span class="score-sep">:</span>
+                <span class="score-away ${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
+            </div>`;
+
+        const half = m.halftime_home !== null && m.halftime_away !== null
+            ? `<div class="half-score">HT ${m.halftime_home}:${m.halftime_away}</div>`
+            : '';
+        const latestGoal = m.latest_goal
+            ? `<div class="latest-goal">${m.latest_goal}</div>`
+            : '';
+
+        return `
+            <a href="/match/${m.fixture_id}" class="match-card" style="border-left: 4px solid ${m.league_color}">
+                <div class="card-header">
+                    <span class="league-name" style="color: ${m.league_color}">${m.emoj} ${m.league_name}</span>
+                    ${badge}
+                </div>
+                <div class="card-body">
+                    <div class="team home">${m.home_team}</div>
+                    ${scoreHtml}
+                    <div class="team away">${m.away_team}</div>
+                </div>
+                ${latestGoal}
+                <div class="card-footer">
+                    ${half}
+                    <span class="venue">${m.venue || ''}</span>
+                </div>
+            </a>
+        `;
+    }
+
+    function refreshData() {
+        loadMatches();
+    }
+
+    setInterval(loadMatches, 30000);
+    loadMatches();
+</script>
+{% endblock %}

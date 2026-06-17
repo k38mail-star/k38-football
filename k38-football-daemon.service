@@ -1,0 +1,18 @@
+[Unit]
+Description=K38 Football Collector Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/k38-football-web
+EnvironmentFile=-/opt/k38-football-web/.env
+ExecStart=/opt/k38-football-web/.venv/bin/python daemon.py
+PIDFile=/tmp/k38-football-daemon.pid
+Restart=on-failure
+RestartSec=5
+User=k38
+Group=k38
+
+[Install]
+WantedBy=multi-user.target
