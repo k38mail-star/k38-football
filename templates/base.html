@@ -4,18 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}K38 足球监控{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ timestamp|default(20260617) }}">
     {% block head %}{% endblock %}
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-brand">
-            <span class="nav-logo">⚽</span>
-            <span class="nav-title">K38 足球监控</span>
+            <span class="nav-logo" aria-hidden="true">⚽</span>
+            <span class="nav-title">K38 足球</span>
         </div>
         <div class="nav-links">
             <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">仪表盘</a>
             <a href="/standings" class="nav-link {% if request.path.startswith('/standings') %}active{% endif %}">积分榜</a>
+            <span class="nav-live-pill"><span class="status-dot green" aria-hidden="true"></span>实时</span>
         </div>
         <div class="nav-status" id="navStatus">
             <span class="status-dot" id="statusDot"></span>

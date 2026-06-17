@@ -2,10 +2,10 @@
 
 {% block content %}
 <div class="filter-bar">
-    <button class="filter-btn active" data-league="all">全部</button>
+    <button class="filter-btn active" data-league="all">全部联赛</button>
     {% for lid, color in leagues.items() %}
-    <button class="filter-btn" data-league="{{ lid }}" style="--league-color: {{ color }}">
-        <span class="league-dot" style="background: {{ color }}"></span>
+    <button class="filter-btn league-{{ lid }}" data-league="{{ lid }}">
+        <span class="league-dot"></span>
         {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
     </button>
     {% endfor %}
@@ -19,12 +19,20 @@
 </div>
 
 <div class="refresh-bar">
-    <span class="update-time">更新于: <span id="updateTime">—</span></span>
-    <button class="refresh-btn" type="button" onclick="refreshData()">🔄 刷新</button>
+    <div class="match-summary">
+        <span class="match-count">全部比赛 <strong id="matchCount">0</strong></span>
+        <span class="update-time">更新于: <span id="updateTime">—</span></span>
+    </div>
+    <button class="refresh-btn" id="refreshBtn" type="button" onclick="refreshData()">🔄 刷新</button>
 </div>
 
-<div class="matches-grid" id="matchesGrid">
-    <div class="loading">加载中...</div>
+<div class="matches-timeline" id="matchesGrid">
+    <div class="skeleton-card" aria-label="正在加载比赛">
+        <span></span><span></span><span></span>
+    </div>
+    <div class="skeleton-card" aria-hidden="true">
+        <span></span><span></span><span></span>
+    </div>
 </div>
 {% endblock %}
 
@@ -32,6 +40,7 @@
 <script>
     let currentLeague = 'all';
     let currentStatus = 'all';
+    const previousScores = new Map();
 
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -53,7 +62,7 @@
 
     async function loadMatches() {
         const grid = document.getElementById('matchesGrid');
-        grid.innerHTML = '<div class="loading">加载中...</div>';
+        grid.innerHTML = loadingSkeleton(4);
 
         try {
             const url = `/api/matches?league=${currentLeague}&status=${currentStatus}`;
@@ -64,66 +73,168 @@
                 data.is_mock ? '🧪 模拟模式' : '📡 实时模式';
             document.getElementById('statusDot').className =
                 'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+            document.getElementById('matchCount').textContent = data.total ?? data.matches.length;
 
             if (data.matches.length === 0) {
                 grid.innerHTML = '<div class="empty-state">📭 暂无比赛数据</div>';
                 return;
             }
 
-            grid.innerHTML = data.matches.map(m => renderCard(m)).join('');
+            grid.innerHTML = renderTimeline(data.matches);
+            requestAnimationFrame(() => {
+                document.querySelectorAll('.match-row.score-changed').forEach(card => {
+                    card.classList.add('flash-score');
+                });
+            });
         } catch (e) {
             grid.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
         }
     }
 
-    function renderCard(m) {
+    function renderTimeline(matches) {
+        const grouped = matches.reduce((acc, match) => {
+            const key = getDateKey(match.match_date);
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(match);
+            return acc;
+        }, {});
+
+        return Object.entries(grouped)
+            .sort(([a], [b]) => dateGroupOrder(a) - dateGroupOrder(b))
+            .map(([dateKey, items]) => `
+            <section class="date-group fade-in">
+                <div class="date-header">
+                    <span>${dateLabel(dateKey)}</span>
+                    <strong>${items.length} 场</strong>
+                </div>
+                <div class="match-rows">
+                    ${items.map((match, index) => renderMatchRow(match, index)).join('')}
+                </div>
+            </section>
+        `).join('');
+    }
+
+    function renderMatchRow(m, index) {
         const isLive = m.status_sort <= 2;
         const isFinished = m.status_sort === 4;
         const isUpcoming = m.status_sort === 3;
+        const matchTime = formatTime(m.match_date);
+        const leagueClass = leagueClassName(m.league_id);
+        const scoreKey = `${m.home_goals ?? ''}-${m.away_goals ?? ''}`;
+        const oldScore = previousScores.get(m.fixture_id);
+        const scoreChanged = oldScore && oldScore !== scoreKey && !isUpcoming;
+        previousScores.set(m.fixture_id, scoreKey);
 
         let badge = '';
-        if (isLive) badge = `<span class="badge live-badge">🟢 ${m.elapsed}'</span>`;
-        else if (isFinished) badge = `<span class="badge finished-badge">🏁 已结束</span>`;
-        else badge = `<span class="badge upcoming-badge">📋 未开始</span>`;
+        if (isLive) badge = `<span class="match-minute"><span class="elapsed-time">${m.elapsed || 0}'</span></span>`;
+        else if (isFinished) badge = `<span class="match-minute muted">FT</span>`;
+        else badge = `<span class="match-minute">${matchTime}</span>`;
 
         const scoreHtml = isUpcoming ? `
-            <div class="score-upcoming">vs</div>
+            <div class="compact-score upcoming">vs</div>
         ` : `
-            <div class="score-display">
-                <span class="score-home ${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
-                <span class="score-sep">:</span>
-                <span class="score-away ${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
+            <div class="compact-score">
+                <span class="${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
+                <span class="score-dash">-</span>
+                <span class="${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
             </div>`;
 
         const half = m.halftime_home !== null && m.halftime_away !== null
             ? `<div class="half-score">HT ${m.halftime_home}:${m.halftime_away}</div>`
             : '';
         const latestGoal = m.latest_goal
-            ? `<div class="latest-goal">${m.latest_goal}</div>`
+            ? `<span class="latest-goal-inline">${escapeHtml(m.latest_goal)}</span>`
             : '';
+        const statusClass = isLive ? 'is-live' : (isFinished ? 'is-finished' : 'is-upcoming');
+        const round = m.round ? ` · ${escapeHtml(m.round)}` : '';
+        const footerLeft = [half, latestGoal].filter(Boolean).join('');
 
         return `
-            <a href="/match/${m.fixture_id}" class="match-card" style="border-left: 4px solid ${m.league_color}">
-                <div class="card-header">
-                    <span class="league-name" style="color: ${m.league_color}">${m.emoj} ${m.league_name}</span>
+            <a href="/match/${m.fixture_id}" class="match-row ${statusClass} ${leagueClass} ${scoreChanged ? 'score-changed' : ''}" data-fixture-id="${m.fixture_id}" data-score="${scoreKey}">
+                ${isLive ? '<span class="live-pulse" aria-hidden="true"></span>' : ''}
+                <div class="match-row-top">
+                    <span class="league-name"><span class="league-dot"></span>${escapeHtml(m.league_name)}${round}</span>
                     ${badge}
                 </div>
-                <div class="card-body">
-                    <div class="team home">${m.home_team}</div>
+                <div class="match-row-main">
+                    <div class="team home">${escapeHtml(m.home_team)}</div>
                     ${scoreHtml}
-                    <div class="team away">${m.away_team}</div>
+                    <div class="team away">${escapeHtml(m.away_team)}</div>
                 </div>
-                ${latestGoal}
-                <div class="card-footer">
-                    ${half}
-                    <span class="venue">${m.venue || ''}</span>
+                <div class="match-row-footer">
+                    <span class="match-note">${footerLeft || (isUpcoming ? '开赛时间 ' + matchTime : '')}</span>
+                    <span class="venue">${escapeHtml(m.venue || '')}</span>
                 </div>
             </a>
         `;
     }
 
-    function refreshData() {
-        loadMatches();
+    function loadingSkeleton(count = 4) {
+        return Array.from({ length: count }, () => `
+            <div class="skeleton-card" aria-hidden="true">
+                <span></span><span></span><span></span>
+            </div>
+        `).join('');
+    }
+
+    async function refreshData() {
+        const btn = document.getElementById('refreshBtn');
+        btn.classList.add('is-refreshing');
+        await loadMatches();
+        setTimeout(() => btn.classList.remove('is-refreshing'), 450);
+    }
+
+    function getDateKey(value) {
+        if (!value) return 'unknown';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return 'unknown';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function dateLabel(dateKey) {
+        if (dateKey === 'unknown') return '待定日期';
+        const today = getDateKey(new Date());
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        if (dateKey === today) return '今天';
+        if (dateKey === getDateKey(tomorrow)) return '明天';
+        if (dateKey === getDateKey(yesterday)) return '昨天';
+        const d = new Date(dateKey + 'T00:00:00');
+        return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
+    }
+
+    function formatTime(value) {
+        if (!value) return '待定';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '待定';
+        return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function dateGroupOrder(dateKey) {
+        if (dateKey === 'unknown') return Number.MAX_SAFE_INTEGER;
+        const today = getDateKey(new Date());
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (dateKey === today) return 0;
+        if (dateKey === getDateKey(tomorrow)) return 1;
+        if (dateKey === getDateKey(yesterday)) return 2;
+        const d = new Date(dateKey + 'T00:00:00');
+        return Number.isNaN(d.getTime()) ? Number.MAX_SAFE_INTEGER : 10 + d.getTime();
+    }
+
+    function leagueClassName(value) {
+        const safe = String(value ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '');
+        return `league-${safe || 'default'}`;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, s => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[s]));
     }
 
     setInterval(loadMatches, 30000);
