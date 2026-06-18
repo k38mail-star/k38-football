@@ -21,6 +21,13 @@ from models import get_db, init_db
 shutdown_requested = False
 
 
+def _next_interval(base_seconds, error_count=0):
+    """Return base interval with capped exponential backoff for repeated failures."""
+    if error_count <= 0:
+        return float(base_seconds)
+    return float(min(settings.POLL_ERROR_SECONDS * (2 ** (error_count - 1)), settings.POLL_IDLE_SECONDS))
+
+
 def configure_logging():
     """Configure file and stdout logging for daemon and logrotate."""
     handlers = [logging.StreamHandler()]
@@ -87,7 +94,7 @@ def ensure_seed_data():
 
 
 def main():
-    """Run live polling every 2 minutes and schedule polling every 5 minutes."""
+    """Run adaptive live and schedule polling."""
     configure_logging()
     logger = logging.getLogger(__name__)
     signal.signal(signal.SIGTERM, handle_shutdown)
@@ -99,6 +106,8 @@ def main():
 
     next_live = 0.0
     next_schedule = 0.0
+    live_errors = 0
+    schedule_errors = 0
     logger.info("daemon started pid=%s mock=%s", Path(settings.PID_FILE).read_text().strip(), USE_MOCK)
 
     try:
@@ -108,15 +117,26 @@ def main():
                 try:
                     count = collect_live_matches()
                     logger.info("live collection complete: %s matches", count)
-                    next_live = time.monotonic() + settings.POLL_LIVE_SECONDS
+                    live_errors = 0
+                    interval = settings.POLL_LIVE_SECONDS if count else settings.POLL_IDLE_SECONDS
+                    next_live = time.monotonic() + interval
                 except Exception:
+                    live_errors += 1
                     logger.exception("live collection failed")
-                    next_live = time.monotonic() + settings.POLL_ERROR_SECONDS
+                    next_live = time.monotonic() + _next_interval(settings.POLL_ERROR_SECONDS, live_errors)
 
             if now >= next_schedule:
                 try:
                     count = collect_schedule()
                     logger.info("schedule collection complete: %s matches", count)
+                    schedule_errors = 0
+                    next_schedule = time.monotonic() + settings.POLL_TODAY_SECONDS
+                except Exception:
+                    schedule_errors += 1
+                    logger.exception("schedule collection failed")
+                    next_schedule = time.monotonic() + _next_interval(settings.POLL_ERROR_SECONDS, schedule_errors)
+
+                try:
                     context = refresh_prediction_context_daily()
                     if not context.get("skipped"):
                         logger.info(
@@ -125,10 +145,8 @@ def main():
                             context["h2h"],
                             context["injuries"],
                         )
-                    next_schedule = time.monotonic() + settings.POLL_TODAY_SECONDS
                 except Exception:
-                    logger.exception("schedule collection failed")
-                    next_schedule = time.monotonic() + settings.POLL_ERROR_SECONDS
+                    logger.exception("prediction context refresh failed")
 
             sleep_until(min(next_live, next_schedule))
     finally:

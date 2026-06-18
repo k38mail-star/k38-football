@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import random
 import time
 import urllib.error
 import urllib.parse
@@ -35,6 +36,17 @@ LIVE_STATUS = {
     "In Progress",
 }
 
+API_CACHE_TTLS = {
+    "fixtures:live": 20,
+    "fixtures:id": 15 * 60,
+    "fixtures:date": 10 * 60,
+    "fixtures/headtohead": 7 * 24 * 60 * 60,
+    "injuries": 6 * 60 * 60,
+}
+
+DETAIL_RETRY_SECONDS = 30 * 60
+_last_api_call_at = 0.0
+
 
 def _utcnow():
     return datetime.utcnow()
@@ -42,6 +54,10 @@ def _utcnow():
 
 def _utcnow_iso():
     return _utcnow().isoformat(timespec="seconds")
+
+
+def _utc_iso_after(seconds):
+    return (_utcnow() + timedelta(seconds=int(seconds))).isoformat(timespec="seconds")
 
 
 def _parse_datetime(value):
@@ -68,10 +84,131 @@ def _cache_is_fresh(fetched_at, ttl_seconds):
     return (_utcnow() - fetched).total_seconds() < ttl_seconds
 
 
-def api_call(endpoint, params=None):
-    """Call API-Football with configured retry and exponential backoff."""
+def _canonical_params(params):
+    return {
+        str(key): str(value)
+        for key, value in sorted((params or {}).items())
+        if value is not None
+    }
+
+
+def _cache_key(endpoint, params):
+    encoded = json.dumps(
+        {"endpoint": endpoint, "params": _canonical_params(params)},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _cache_ttl(endpoint, params):
+    params = params or {}
+    if endpoint == "fixtures" and params.get("live"):
+        return API_CACHE_TTLS["fixtures:live"]
+    if endpoint == "fixtures" and params.get("id"):
+        return API_CACHE_TTLS["fixtures:id"]
+    if endpoint == "fixtures" and params.get("date"):
+        return API_CACHE_TTLS["fixtures:date"]
+    return API_CACHE_TTLS.get(endpoint)
+
+
+def _get_cached_api_response(endpoint, params):
+    ttl = _cache_ttl(endpoint, params)
+    if not ttl:
+        return None
+
+    key = _cache_key(endpoint, params)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT response
+            FROM football_api_cache
+            WHERE cache_key = ?
+              AND expires_at > ?
+            """,
+            (key, _utcnow_iso()),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["response"])
+    except json.JSONDecodeError:
+        logger.warning("Ignoring corrupt API cache entry for %s %s", endpoint, params)
+        return None
+
+
+def _save_api_cache(endpoint, params, data):
+    ttl = _cache_ttl(endpoint, params)
+    if not ttl or data is None:
+        return
+
+    key = _cache_key(endpoint, params)
+    params_json = json.dumps(_canonical_params(params), ensure_ascii=False, sort_keys=True)
+    response_json = json.dumps(data, ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO football_api_cache
+                (cache_key, endpoint, params, response, fetched_at, expires_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(cache_key) DO UPDATE SET
+                response=excluded.response,
+                fetched_at=excluded.fetched_at,
+                expires_at=excluded.expires_at,
+                updated_at=datetime('now')
+            """,
+            (key, endpoint, params_json, response_json, _utcnow_iso(), _utc_iso_after(ttl)),
+        )
+
+
+def _rate_limit_sleep(delay):
+    global _last_api_call_at
+    delay = float(delay or 0)
+    if delay <= 0:
+        return
+    elapsed = time.monotonic() - _last_api_call_at
+    if elapsed < delay:
+        time.sleep(delay - elapsed)
+
+
+def _record_api_call():
+    global _last_api_call_at
+    _last_api_call_at = time.monotonic()
+
+
+def _retry_after_seconds(exc):
+    value = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None
+
+
+def _api_has_errors(data):
+    if not isinstance(data, dict):
+        return False
+    errors = data.get("errors")
+    if isinstance(errors, list):
+        return bool(errors)
+    if isinstance(errors, dict):
+        return bool(errors)
+    return bool(errors)
+
+
+def api_call(endpoint, params=None, use_cache=True, force_refresh=False):
+    """Call API-Football with cache, retry, rate limiting, and exponential backoff."""
     if USE_MOCK:
         return None
+
+    params = params or {}
+    if use_cache and not force_refresh:
+        cached = _get_cached_api_response(endpoint, params)
+        if cached is not None:
+            logger.debug("API cache hit: %s %s", endpoint, params)
+            return cached
 
     url = f"{settings.API_BASE.rstrip('/')}/{endpoint}"
     if params:
@@ -85,20 +222,32 @@ def api_call(endpoint, params=None):
     attempts = max(1, int(settings.API_RETRIES))
     for attempt in range(attempts):
         try:
+            _rate_limit_sleep(settings.API_BASE_DELAY)
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=settings.API_TIMEOUT) as resp:
-                return json.loads(resp.read().decode())
+                _record_api_call()
+                data = json.loads(resp.read().decode())
+                if _api_has_errors(data):
+                    logger.warning("API returned errors for %s %s: %s", endpoint, params, data.get("errors"))
+                else:
+                    _save_api_cache(endpoint, params, data)
+                return data
         except urllib.error.HTTPError as exc:
+            _record_api_call()
             retryable = exc.code in {408, 425, 429, 500, 502, 503, 504}
             if not retryable or attempt == attempts - 1:
-                logger.warning("API call failed: %s %s", exc.code, url)
+                logger.warning("API call failed after %s attempt(s): HTTP %s %s", attempt + 1, exc.code, url)
                 return None
+            retry_after = _retry_after_seconds(exc)
         except Exception as exc:
+            _record_api_call()
             if attempt == attempts - 1:
-                logger.warning("API call failed: %s", exc)
+                logger.warning("API call failed after %s attempt(s): %s %s", attempt + 1, endpoint, exc)
                 return None
+            retry_after = None
 
-        sleep_for = min(settings.API_BACKOFF_MAX, settings.API_BACKOFF_BASE * (2 ** attempt))
+        base_sleep = min(settings.API_BACKOFF_MAX, settings.API_BACKOFF_BASE * (2 ** attempt))
+        sleep_for = retry_after if retry_after is not None else base_sleep + random.uniform(0, base_sleep * 0.25)
         time.sleep(sleep_for)
 
     return None
@@ -263,16 +412,19 @@ def collect_live_matches():
         return 0
 
     count = 0
-    data = api_call("fixtures", {"live": "all"})
+    detail_count = 0
+    data = api_call("fixtures", {"live": "all"}, use_cache=False)
     if data and "response" in data:
         for fix in data["response"]:
             league_id = fix.get("league", {}).get("id")
             if league_id in LEAGUES:
                 match = _parse_fixture(fix)
                 save_match(match)
-                fetch_and_save_detail(match["fixture_id"])
+                if _should_fetch_detail(match) and fetch_and_save_detail(match["fixture_id"]):
+                    detail_count += 1
                 count += 1
-                time.sleep(settings.API_LIVE_DELAY)
+    if detail_count:
+        logger.info("live detail refresh complete: %s fixtures", detail_count)
     return count
 
 
@@ -304,7 +456,6 @@ def collect_schedule():
                     if current <= today and _should_fetch_detail(match):
                         fetch_and_save_detail(match["fixture_id"])
                     count += 1
-            time.sleep(settings.API_BASE_DELAY)
         current += timedelta(days=1)
 
     collect_finished_match_details()
@@ -587,13 +738,18 @@ def fetch_and_save_detail(fixture_id):
     if USE_MOCK or not fixture_id:
         return False
 
+    if _detail_recently_attempted(fixture_id):
+        return False
+
     data = api_call("fixtures", {"id": fixture_id})
     response = data.get("response", []) if data else []
     if not response:
+        _mark_detail_attempt(fixture_id)
         return False
 
     match = _parse_fixture(response[0], details_fetched=True)
     save_match(match)
+    _mark_detail_attempt(fixture_id)
     return True
 
 
@@ -636,6 +792,8 @@ def _should_fetch_detail(match):
     fixture_id = match.get("fixture_id")
     if not fixture_id:
         return False
+    if _detail_recently_attempted(fixture_id):
+        return False
     if not _is_finished_status(match.get("status")):
         return True
     return not _details_already_fetched(fixture_id)
@@ -648,6 +806,45 @@ def _details_already_fetched(fixture_id):
             (fixture_id,),
         ).fetchone()
     return bool(row and row["details_fetched_at"])
+
+
+def _detail_recently_attempted(fixture_id):
+    key = _cache_key("fixtures:detail-attempt", {"id": fixture_id})
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM football_api_cache
+            WHERE cache_key = ?
+              AND expires_at > ?
+            """,
+            (key, _utcnow_iso()),
+        ).fetchone()
+    return bool(row)
+
+
+def _mark_detail_attempt(fixture_id):
+    key = _cache_key("fixtures:detail-attempt", {"id": fixture_id})
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO football_api_cache
+                (cache_key, endpoint, params, response, fetched_at, expires_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(cache_key) DO UPDATE SET
+                fetched_at=excluded.fetched_at,
+                expires_at=excluded.expires_at,
+                updated_at=datetime('now')
+            """,
+            (
+                key,
+                "fixtures:detail-attempt",
+                json.dumps({"id": int(fixture_id)}, sort_keys=True),
+                "{}",
+                _utcnow_iso(),
+                _utc_iso_after(DETAIL_RETRY_SECONDS),
+            ),
+        )
 
 
 def _is_finished_status(status):
