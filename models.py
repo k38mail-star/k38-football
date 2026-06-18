@@ -91,8 +91,52 @@ def init_db():
                 refreshed_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS prediction_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                algorithm TEXT NOT NULL,
+                prediction_version TEXT NOT NULL,
+                fixture_id INTEGER NOT NULL,
+                season TEXT,
+                league_id INTEGER,
+                league_name TEXT,
+                match_date TEXT,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                home_team_cn TEXT,
+                away_team_cn TEXT,
+                home_flag TEXT,
+                away_flag TEXT,
+                predicted_result TEXT NOT NULL,
+                actual_result TEXT NOT NULL,
+                predicted_winner TEXT,
+                actual_winner TEXT,
+                confidence REAL NOT NULL,
+                is_correct INTEGER NOT NULL,
+                home_win_probability REAL,
+                draw_probability REAL,
+                away_win_probability REAL,
+                probability_margin REAL,
+                brier_score REAL,
+                log_loss REAL,
+                home_goals INTEGER NOT NULL,
+                away_goals INTEGER NOT NULL,
+                details TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(run_id, algorithm, fixture_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_football_injuries_team_season
                 ON football_injuries(team_id, season, fetched_at);
+
+            CREATE INDEX IF NOT EXISTS idx_prediction_log_run_algorithm
+                ON prediction_log(run_id, algorithm);
+
+            CREATE INDEX IF NOT EXISTS idx_prediction_log_fixture
+                ON prediction_log(fixture_id);
+
+            CREATE INDEX IF NOT EXISTS idx_prediction_log_algorithm_created
+                ON prediction_log(algorithm, created_at);
         """)
         columns = {
             row["name"]
@@ -100,3 +144,21 @@ def init_db():
         }
         if "details_fetched_at" not in columns:
             conn.execute("ALTER TABLE football_matches ADD COLUMN details_fetched_at TEXT")
+
+        prediction_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(prediction_log)").fetchall()
+        }
+        prediction_column_defs = {
+            "league_id": "INTEGER",
+            "league_name": "TEXT",
+            "home_win_probability": "REAL",
+            "draw_probability": "REAL",
+            "away_win_probability": "REAL",
+            "probability_margin": "REAL",
+            "brier_score": "REAL",
+            "log_loss": "REAL",
+        }
+        for column, definition in prediction_column_defs.items():
+            if column not in prediction_columns:
+                conn.execute(f"ALTER TABLE prediction_log ADD COLUMN {column} {definition}")

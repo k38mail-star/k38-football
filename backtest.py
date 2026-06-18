@@ -30,8 +30,10 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "football.db"
 DEFAULT_ELO = 1500.0
 ELO_K_FACTOR = 32.0
-RECENT_MATCH_LIMIT = 5
-PREDICTION_VERSION = "2026-06-18"
+HOME_ADVANTAGE_ELO = 60.0
+RECENT_MATCH_LIMIT = 8
+PREDICTION_VERSION = "2026-06-19-v2"
+RESULTS = ("HOME", "DRAW", "AWAY")
 
 
 FINISHED_STATUS_KEYWORDS = (
@@ -77,6 +79,7 @@ class Prediction:
     algorithm: str
     predicted_result: str
     confidence: float
+    probabilities: dict[str, float]
     details: dict[str, Any]
 
 
@@ -85,7 +88,7 @@ class BacktestError(Exception):
 
 
 class EloModel:
-    name = "elo"
+    name = "elo_v2"
 
     def __init__(self) -> None:
         self.ratings: dict[str, float] = defaultdict(lambda: DEFAULT_ELO)
@@ -93,39 +96,35 @@ class EloModel:
     def predict(self, match: Match) -> Prediction:
         home_elo = self.ratings[match.home_team]
         away_elo = self.ratings[match.away_team]
-        home_probability = expected_score(home_elo, away_elo)
-        predicted_result = "HOME" if home_elo >= away_elo else "AWAY"
-        confidence = max(home_probability, 1.0 - home_probability)
+        probabilities = elo_probabilities(home_elo, away_elo)
+        predicted_result, confidence = prediction_from_probabilities(probabilities)
 
         return Prediction(
             algorithm=self.name,
             predicted_result=predicted_result,
             confidence=confidence,
+            probabilities=probabilities,
             details={
                 "home_elo": round(home_elo, 2),
                 "away_elo": round(away_elo, 2),
-                "home_win_probability": round(home_probability, 4),
-                "away_win_probability": round(1.0 - home_probability, 4),
+                **rounded_probabilities(probabilities),
             },
         )
 
     def update(self, match: Match) -> None:
-        if match.actual_result == "DRAW":
-            return
+        home_elo = self.ratings[match.home_team]
+        away_elo = self.ratings[match.away_team]
+        expected_home = expected_score(home_elo + HOME_ADVANTAGE_ELO, away_elo)
+        actual_home = {"HOME": 1.0, "DRAW": 0.5, "AWAY": 0.0}[match.actual_result]
+        goal_multiplier = 1.0 + min(abs(match.home_goals - match.away_goals), 4) * 0.12
+        adjustment = ELO_K_FACTOR * goal_multiplier * (actual_home - expected_home)
 
-        winner = match.home_team if match.actual_result == "HOME" else match.away_team
-        loser = match.away_team if match.actual_result == "HOME" else match.home_team
-        winner_elo = self.ratings[winner]
-        loser_elo = self.ratings[loser]
-        win_probability = expected_score(winner_elo, loser_elo)
-        adjustment = ELO_K_FACTOR - (win_probability * ELO_K_FACTOR)
-
-        self.ratings[winner] = winner_elo + adjustment
-        self.ratings[loser] = loser_elo - adjustment
+        self.ratings[match.home_team] = home_elo + adjustment
+        self.ratings[match.away_team] = away_elo - adjustment
 
 
 class RecentFormModel:
-    name = "recent_form"
+    name = "recent_form_v2"
 
     def __init__(self) -> None:
         self.team_matches: dict[tuple[str, str], deque[dict[str, Any]]] = defaultdict(
@@ -137,13 +136,14 @@ class RecentFormModel:
         home_form = self._score_team(competition, match.home_team)
         away_form = self._score_team(competition, match.away_team)
         score_delta = home_form["score"] - away_form["score"]
-        predicted_result = result_from_delta(score_delta, draw_band=0.08)
-        confidence = bounded_confidence(0.34 + min(abs(score_delta) / 2.5, 0.55))
+        probabilities = delta_probabilities(score_delta, draw_base=0.28, sharpness=1.55)
+        predicted_result, confidence = prediction_from_probabilities(probabilities)
 
         return Prediction(
             algorithm=self.name,
             predicted_result=predicted_result,
             confidence=confidence,
+            probabilities=probabilities,
             details={
                 "competition": competition,
                 "home_recent_matches": home_form["matches"],
@@ -153,6 +153,7 @@ class RecentFormModel:
                 "home_avg_goal_diff": round(home_form["avg_goal_diff"], 4),
                 "away_avg_goal_diff": round(away_form["avg_goal_diff"], 4),
                 "score_delta": round(score_delta, 4),
+                **rounded_probabilities(probabilities),
             },
         )
 
@@ -192,7 +193,7 @@ class RecentFormModel:
 
         weighted_win_rate = weighted_points / total_weight
         avg_goal_diff = weighted_goal_diff / total_weight
-        score = weighted_win_rate + (avg_goal_diff * 0.25)
+        score = weighted_win_rate + (avg_goal_diff * 0.22)
 
         return {
             "matches": len(recent),
@@ -203,7 +204,7 @@ class RecentFormModel:
 
 
 class H2HModel:
-    name = "h2h"
+    name = "h2h_v2"
 
     def __init__(self, elo_model: EloModel) -> None:
         self.elo_model = elo_model
@@ -218,6 +219,7 @@ class H2HModel:
                 algorithm=self.name,
                 predicted_result=fallback.predicted_result,
                 confidence=fallback.confidence,
+                probabilities=fallback.probabilities,
                 details={
                     "fallback": "elo",
                     "h2h_meetings": 0,
@@ -244,14 +246,15 @@ class H2HModel:
             away_score += 0.75
 
         score_delta = home_score - away_score
-        predicted_result = result_from_delta(score_delta, draw_band=0.30)
         total_score = max(home_score + away_score, 1.0)
-        confidence = bounded_confidence(0.34 + min(abs(score_delta) / total_score, 0.50))
+        probabilities = delta_probabilities(score_delta / total_score, draw_base=0.30, sharpness=2.0)
+        predicted_result, confidence = prediction_from_probabilities(probabilities)
 
         return Prediction(
             algorithm=self.name,
             predicted_result=predicted_result,
             confidence=confidence,
+            probabilities=probabilities,
             details={
                 "h2h_meetings": len(meetings),
                 "home_h2h_score": round(home_score, 4),
@@ -259,6 +262,7 @@ class H2HModel:
                 "latest_result": latest["result"],
                 "latest_match_date": latest["match_date"],
                 "score_delta": round(score_delta, 4),
+                **rounded_probabilities(probabilities),
             },
         )
 
@@ -281,6 +285,104 @@ class H2HModel:
                 "score": f"{match.home_goals}-{match.away_goals}",
             }
         )
+
+
+class PoissonGoalModel:
+    name = "poisson_goals"
+
+    def __init__(self) -> None:
+        self.team_matches: dict[str, deque[dict[str, Any]]] = defaultdict(
+            lambda: deque(maxlen=RECENT_MATCH_LIMIT)
+        )
+
+    def predict(self, match: Match) -> Prediction:
+        home_attack = self._team_average(match.home_team, "goals_for", default=1.35)
+        home_defense = self._team_average(match.home_team, "goals_against", default=1.15)
+        away_attack = self._team_average(match.away_team, "goals_for", default=1.15)
+        away_defense = self._team_average(match.away_team, "goals_against", default=1.35)
+        home_expected = clamp((home_attack + away_defense) / 2.0 + 0.18, 0.25, 3.8)
+        away_expected = clamp((away_attack + home_defense) / 2.0, 0.20, 3.6)
+        probabilities = poisson_match_probabilities(home_expected, away_expected)
+        predicted_result, confidence = prediction_from_probabilities(probabilities)
+
+        return Prediction(
+            algorithm=self.name,
+            predicted_result=predicted_result,
+            confidence=confidence,
+            probabilities=probabilities,
+            details={
+                "home_expected_goals": round(home_expected, 3),
+                "away_expected_goals": round(away_expected, 3),
+                "home_sample": len(self.team_matches[match.home_team]),
+                "away_sample": len(self.team_matches[match.away_team]),
+                **rounded_probabilities(probabilities),
+            },
+        )
+
+    def update(self, match: Match) -> None:
+        self.team_matches[match.home_team].append(
+            {"goals_for": match.home_goals, "goals_against": match.away_goals}
+        )
+        self.team_matches[match.away_team].append(
+            {"goals_for": match.away_goals, "goals_against": match.home_goals}
+        )
+
+    def _team_average(self, team: str, key: str, *, default: float) -> float:
+        matches = list(self.team_matches[team])
+        if not matches:
+            return default
+        weights = list(range(1, len(matches) + 1))
+        weighted = sum(float(item[key]) * weight for item, weight in zip(matches, weights))
+        return weighted / sum(weights)
+
+
+class EnsembleModel:
+    name = "ensemble_v2"
+
+    def __init__(self, models: tuple[Any, ...]) -> None:
+        self.models = models
+        self.weights = {
+            "elo_v2": 0.32,
+            "recent_form_v2": 0.26,
+            "h2h_v2": 0.16,
+            "poisson_goals": 0.26,
+        }
+
+    def predict(self, match: Match) -> Prediction:
+        parts = [model.predict(match) for model in self.models]
+        weighted = {result: 0.0 for result in RESULTS}
+        total_weight = 0.0
+        for part in parts:
+            weight = self.weights.get(part.algorithm, 0.0)
+            total_weight += weight
+            for result in RESULTS:
+                weighted[result] += part.probabilities[result] * weight
+        probabilities = normalize_probabilities(weighted, total_weight or 1.0)
+        predicted_result, confidence = prediction_from_probabilities(probabilities)
+        ordered = sorted(probabilities.values(), reverse=True)
+
+        return Prediction(
+            algorithm=self.name,
+            predicted_result=predicted_result,
+            confidence=confidence,
+            probabilities=probabilities,
+            details={
+                "weights": self.weights,
+                "probability_margin": round(ordered[0] - ordered[1], 4),
+                "components": {
+                    part.algorithm: {
+                        "predicted_result": part.predicted_result,
+                        "confidence": round(part.confidence, 4),
+                        **rounded_probabilities(part.probabilities),
+                    }
+                    for part in parts
+                },
+                **rounded_probabilities(probabilities),
+            },
+        )
+
+    def update(self, match: Match) -> None:
+        return None
 
 
 def main() -> int:
@@ -342,21 +444,19 @@ def run_backtest(
         elo_model = EloModel()
         recent_form_model = RecentFormModel()
         h2h_model = H2HModel(elo_model)
-        models = (elo_model, recent_form_model, h2h_model)
+        poisson_model = PoissonGoalModel()
+        base_models = (elo_model, recent_form_model, h2h_model, poisson_model)
+        ensemble_model = EnsembleModel(base_models)
+        models = (*base_models, ensemble_model)
 
-        summaries: dict[str, dict[str, int]] = {
-            model.name: {"total": 0, "correct": 0, "home": 0, "away": 0, "draw": 0}
-            for model in models
-        }
+        summaries: dict[str, dict[str, Any]] = {model.name: new_summary() for model in models}
 
         for match in matches:
             predictions = [model.predict(match) for model in models]
             for prediction in predictions:
                 is_correct = prediction.predicted_result == match.actual_result
                 summary = summaries[prediction.algorithm]
-                summary["total"] += 1
-                summary["correct"] += int(is_correct)
-                summary[match.actual_result.lower()] += 1
+                update_summary(summary, prediction, match)
                 insert_prediction_log(
                     conn=conn,
                     run_id=run_id,
@@ -366,7 +466,7 @@ def run_backtest(
                     is_correct=is_correct,
                 )
 
-            for model in models:
+            for model in base_models:
                 model.update(match)
 
         conn.commit()
@@ -406,12 +506,20 @@ def ensure_prediction_log(conn: sqlite3.Connection) -> None:
             away_team_cn TEXT,
             home_flag TEXT,
             away_flag TEXT,
+            league_id INTEGER,
+            league_name TEXT,
             predicted_result TEXT NOT NULL,
             actual_result TEXT NOT NULL,
             predicted_winner TEXT,
             actual_winner TEXT,
             confidence REAL NOT NULL,
             is_correct INTEGER NOT NULL,
+            home_win_probability REAL,
+            draw_probability REAL,
+            away_win_probability REAL,
+            probability_margin REAL,
+            brier_score REAL,
+            log_loss REAL,
             home_goals INTEGER NOT NULL,
             away_goals INTEGER NOT NULL,
             details TEXT NOT NULL DEFAULT '{}',
@@ -432,6 +540,20 @@ def ensure_prediction_log(conn: sqlite3.Connection) -> None:
         ON prediction_log(fixture_id)
         """
     )
+    columns = table_columns(conn, "prediction_log")
+    column_defs = {
+        "league_id": "INTEGER",
+        "league_name": "TEXT",
+        "home_win_probability": "REAL",
+        "draw_probability": "REAL",
+        "away_win_probability": "REAL",
+        "probability_margin": "REAL",
+        "brier_score": "REAL",
+        "log_loss": "REAL",
+    }
+    for column, definition in column_defs.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE prediction_log ADD COLUMN {column} {definition}")
 
 
 def load_finished_matches(conn: sqlite3.Connection, limit: int | None = None) -> list[Match]:
@@ -542,6 +664,9 @@ def insert_prediction_log(
     prediction: Prediction,
     is_correct: bool,
 ) -> None:
+    probability_margin = top_probability_margin(prediction.probabilities)
+    brier = brier_score(prediction.probabilities, match.actual_result)
+    loss = log_loss(prediction.probabilities, match.actual_result)
     conn.execute(
         """
         INSERT INTO prediction_log (
@@ -557,18 +682,26 @@ def insert_prediction_log(
             away_team_cn,
             home_flag,
             away_flag,
+            league_id,
+            league_name,
             predicted_result,
             actual_result,
             predicted_winner,
             actual_winner,
             confidence,
             is_correct,
+            home_win_probability,
+            draw_probability,
+            away_win_probability,
+            probability_margin,
+            brier_score,
+            log_loss,
             home_goals,
             away_goals,
             details,
             created_at
         )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(run_id, algorithm, fixture_id) DO UPDATE SET
             predicted_result=excluded.predicted_result,
             actual_result=excluded.actual_result,
@@ -576,6 +709,12 @@ def insert_prediction_log(
             actual_winner=excluded.actual_winner,
             confidence=excluded.confidence,
             is_correct=excluded.is_correct,
+            home_win_probability=excluded.home_win_probability,
+            draw_probability=excluded.draw_probability,
+            away_win_probability=excluded.away_win_probability,
+            probability_margin=excluded.probability_margin,
+            brier_score=excluded.brier_score,
+            log_loss=excluded.log_loss,
             home_goals=excluded.home_goals,
             away_goals=excluded.away_goals,
             details=excluded.details,
@@ -594,12 +733,20 @@ def insert_prediction_log(
             match.away_team_cn,
             match.home_flag,
             match.away_flag,
+            match.league_id,
+            match.league_name,
             prediction.predicted_result,
             match.actual_result,
             winner_name(match, prediction.predicted_result),
             winner_name(match, match.actual_result),
             round(prediction.confidence, 6),
             int(is_correct),
+            round(prediction.probabilities["HOME"], 6),
+            round(prediction.probabilities["DRAW"], 6),
+            round(prediction.probabilities["AWAY"], 6),
+            round(probability_margin, 6),
+            round(brier, 6),
+            round(loss, 6),
             match.home_goals,
             match.away_goals,
             json.dumps(prediction.details, ensure_ascii=False, sort_keys=True),
@@ -624,6 +771,121 @@ def is_finished_status(status: str | None) -> bool:
 
 def expected_score(team_elo: float, opponent_elo: float) -> float:
     return 1.0 / (1.0 + math.pow(10.0, (opponent_elo - team_elo) / 400.0))
+
+
+def elo_probabilities(home_elo: float, away_elo: float) -> dict[str, float]:
+    expected_home = expected_score(home_elo + HOME_ADVANTAGE_ELO, away_elo)
+    draw_probability = clamp(0.28 - abs(expected_home - 0.5) * 0.18, 0.18, 0.31)
+    remaining = 1.0 - draw_probability
+    return {
+        "HOME": remaining * expected_home,
+        "DRAW": draw_probability,
+        "AWAY": remaining * (1.0 - expected_home),
+    }
+
+
+def delta_probabilities(delta: float, *, draw_base: float, sharpness: float) -> dict[str, float]:
+    home_strength = math.exp(delta * sharpness)
+    away_strength = math.exp(-delta * sharpness)
+    draw_probability = clamp(draw_base - min(abs(delta), 1.0) * 0.12, 0.16, 0.36)
+    remaining = 1.0 - draw_probability
+    side_total = home_strength + away_strength
+    return {
+        "HOME": remaining * home_strength / side_total,
+        "DRAW": draw_probability,
+        "AWAY": remaining * away_strength / side_total,
+    }
+
+
+def poisson_match_probabilities(home_expected: float, away_expected: float) -> dict[str, float]:
+    home = draw = away = 0.0
+    for home_goals in range(8):
+        home_p = poisson_probability(home_expected, home_goals)
+        for away_goals in range(8):
+            probability = home_p * poisson_probability(away_expected, away_goals)
+            if home_goals > away_goals:
+                home += probability
+            elif home_goals == away_goals:
+                draw += probability
+            else:
+                away += probability
+    return normalize_probabilities({"HOME": home, "DRAW": draw, "AWAY": away}, home + draw + away)
+
+
+def poisson_probability(expected_goals: float, goals: int) -> float:
+    return math.exp(-expected_goals) * math.pow(expected_goals, goals) / math.factorial(goals)
+
+
+def normalize_probabilities(values: dict[str, float], total: float | None = None) -> dict[str, float]:
+    denominator = total if total is not None else sum(values.values())
+    if denominator <= 0:
+        return {"HOME": 1 / 3, "DRAW": 1 / 3, "AWAY": 1 / 3}
+    return {result: clamp(values.get(result, 0.0) / denominator, 0.001, 0.998) for result in RESULTS}
+
+
+def prediction_from_probabilities(probabilities: dict[str, float]) -> tuple[str, float]:
+    home_away_margin = abs(probabilities["HOME"] - probabilities["AWAY"])
+    if probabilities["DRAW"] >= 0.24 and home_away_margin <= 0.075:
+        return "DRAW", bounded_confidence(probabilities["DRAW"])
+    result = max(RESULTS, key=lambda key: probabilities[key])
+    return result, bounded_confidence(probabilities[result])
+
+
+def rounded_probabilities(probabilities: dict[str, float]) -> dict[str, float]:
+    return {
+        "home_win_probability": round(probabilities["HOME"], 4),
+        "draw_probability": round(probabilities["DRAW"], 4),
+        "away_win_probability": round(probabilities["AWAY"], 4),
+    }
+
+
+def top_probability_margin(probabilities: dict[str, float]) -> float:
+    ordered = sorted(probabilities.values(), reverse=True)
+    return ordered[0] - ordered[1]
+
+
+def brier_score(probabilities: dict[str, float], actual_result: str) -> float:
+    return sum((probabilities[result] - (1.0 if result == actual_result else 0.0)) ** 2 for result in RESULTS)
+
+
+def log_loss(probabilities: dict[str, float], actual_result: str) -> float:
+    return -math.log(max(0.001, min(0.999, probabilities[actual_result])))
+
+
+def new_summary() -> dict[str, Any]:
+    return {
+        "total": 0,
+        "correct": 0,
+        "home": 0,
+        "away": 0,
+        "draw": 0,
+        "confidence_sum": 0.0,
+        "brier_sum": 0.0,
+        "log_loss_sum": 0.0,
+        "margin_sum": 0.0,
+        "predicted": {result: 0 for result in RESULTS},
+        "actual": {result: 0 for result in RESULTS},
+        "correct_by_result": {result: 0 for result in RESULTS},
+    }
+
+
+def update_summary(summary: dict[str, Any], prediction: Prediction, match: Match) -> None:
+    actual = match.actual_result
+    is_correct = prediction.predicted_result == actual
+    summary["total"] += 1
+    summary["correct"] += int(is_correct)
+    summary[actual.lower()] += 1
+    summary["confidence_sum"] += prediction.confidence
+    summary["brier_sum"] += brier_score(prediction.probabilities, actual)
+    summary["log_loss_sum"] += log_loss(prediction.probabilities, actual)
+    summary["margin_sum"] += top_probability_margin(prediction.probabilities)
+    summary["predicted"][prediction.predicted_result] += 1
+    summary["actual"][actual] += 1
+    summary["correct_by_result"][actual] += int(is_correct)
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def result_for_team(match: Match, team: str) -> str:
@@ -696,14 +958,35 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"Matches: {report['match_count']}")
     print(f"Date range: {report['first_match_date']} -> {report['last_match_date']}")
     print()
-    print(f"{'Algorithm':<16} {'Correct':>8} {'Total':>8} {'Accuracy':>10}")
-    print("-" * 46)
+    print(
+        f"{'Algorithm':<18} {'Correct':>8} {'Total':>8} {'Accuracy':>10} "
+        f"{'AvgConf':>9} {'Brier':>8} {'LogLoss':>8} {'DrawRec':>8}"
+    )
+    print("-" * 86)
 
     for algorithm, summary in report["summaries"].items():
         total = summary["total"]
         correct = summary["correct"]
         accuracy = (correct / total * 100.0) if total else 0.0
-        print(f"{algorithm:<16} {correct:>8} {total:>8} {accuracy:>9.2f}%")
+        avg_confidence = summary["confidence_sum"] / total * 100.0 if total else 0.0
+        avg_brier = summary["brier_sum"] / total if total else 0.0
+        avg_log_loss = summary["log_loss_sum"] / total if total else 0.0
+        draw_total = summary["actual"]["DRAW"]
+        draw_recall = summary["correct_by_result"]["DRAW"] / draw_total * 100.0 if draw_total else 0.0
+        print(
+            f"{algorithm:<18} {correct:>8} {total:>8} {accuracy:>9.2f}% "
+            f"{avg_confidence:>8.2f}% {avg_brier:>8.3f} {avg_log_loss:>8.3f} "
+            f"{draw_recall:>7.2f}%"
+        )
+
+    print()
+    print("Prediction distribution (HOME/DRAW/AWAY):")
+    for algorithm, summary in report["summaries"].items():
+        predicted = summary["predicted"]
+        print(
+            f"- {algorithm}: "
+            f"{predicted['HOME']}/{predicted['DRAW']}/{predicted['AWAY']}"
+        )
 
     print()
     print("Prediction records saved to prediction_log.")
