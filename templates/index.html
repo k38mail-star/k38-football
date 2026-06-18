@@ -1,243 +1,330 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="filter-bar">
-    <button class="filter-btn active" data-league="all">全部联赛</button>
-    {% for lid, color in leagues.items() %}
-    <button class="filter-btn league-{{ lid }}" data-league="{{ lid }}">
-        <span class="league-dot"></span>
-        {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
-    </button>
-    {% endfor %}
-</div>
-
-<div class="status-tabs">
-    <button class="tab-btn active" data-status="all">全部</button>
-    <button class="tab-btn" data-status="live">🟢 进行中</button>
-    <button class="tab-btn" data-status="upcoming">📋 未开始</button>
-    <button class="tab-btn" data-status="finished">🏁 已结束</button>
-</div>
-
-<div class="refresh-bar">
-    <div class="match-summary">
-        <span class="match-count">全部比赛 <strong id="matchCount">0</strong></span>
-        <span class="update-time">更新于: <span id="updateTime">—</span></span>
+<!-- Hero Section -->
+<section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-content">
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <span class="hero-stat-num" id="heroTotal">0</span>
+                <span class="hero-stat-label">今日比赛</span>
+            </div>
+            <div class="hero-stat">
+                <span class="hero-stat-num live" id="heroLive">0</span>
+                <span class="hero-stat-label">直播中</span>
+            </div>
+            <div class="hero-stat">
+                <span class="hero-stat-num" id="heroUpcoming">0</span>
+                <span class="hero-stat-label">即将开始</span>
+            </div>
+        </div>
     </div>
-    <button class="refresh-btn" id="refreshBtn" type="button" onclick="refreshData()">🔄 刷新</button>
-</div>
+</section>
 
-<div class="matches-timeline" id="matchesGrid">
-    <div class="skeleton-card" aria-label="正在加载比赛">
-        <span></span><span></span><span></span>
+<!-- Filters -->
+<section class="filters">
+    <div class="filter-section">
+        <div class="filter-label">联赛</div>
+        <div class="filter-pills" id="leagueFilters">
+            <button class="pill active" data-league="all">全部</button>
+            {% for lid, color in leagues.items() %}
+            <button class="pill" data-league="{{ lid }}" style="--pill-color: {{ color }}">
+                {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
+            </button>
+            {% endfor %}
+        </div>
     </div>
-    <div class="skeleton-card" aria-hidden="true">
-        <span></span><span></span><span></span>
+    <div class="filter-section">
+        <div class="filter-label">状态</div>
+        <div class="filter-pills" id="statusFilters">
+            <button class="pill active" data-status="all">全部 <span class="pill-count" id="countAll">0</span></button>
+            <button class="pill pill-live" data-status="live">🟢 直播中 <span class="pill-count" id="countLive">0</span></button>
+            <button class="pill pill-upcoming" data-status="upcoming">📋 未开始 <span class="pill-count" id="countUpcoming">0</span></button>
+            <button class="pill pill-finished" data-status="finished">🏁 已结束 <span class="pill-count" id="countFinished">0</span></button>
+        </div>
     </div>
-</div>
+</section>
+
+<!-- Match List -->
+<section class="matches" id="matchesContainer">
+    <div class="loading-screen">
+        <div class="loading-spinner"></div>
+        <span>加载比赛数据...</span>
+    </div>
+</section>
 {% endblock %}
 
 {% block scripts %}
 <script>
     let currentLeague = 'all';
     let currentStatus = 'all';
-    const previousScores = new Map();
 
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentLeague = btn.dataset.league;
-            loadMatches();
-        });
+    // Filter handlers
+    document.getElementById('leagueFilters').addEventListener('click', e => {
+        const btn = e.target.closest('.pill');
+        if (!btn) return;
+        document.querySelectorAll('#leagueFilters .pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentLeague = btn.dataset.league;
+        loadMatches();
     });
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentStatus = btn.dataset.status;
-            loadMatches();
-        });
+    document.getElementById('statusFilters').addEventListener('click', e => {
+        const btn = e.target.closest('.pill');
+        if (!btn) return;
+        document.querySelectorAll('#statusFilters .pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentStatus = btn.dataset.status;
+        loadMatches();
     });
 
     async function loadMatches() {
-        const grid = document.getElementById('matchesGrid');
-        grid.innerHTML = loadingSkeleton(4);
+        const container = document.getElementById('matchesContainer');
+        container.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><span>加载比赛数据...</span></div>';
 
         try {
-            const url = `/api/matches?league=${currentLeague}&status=${currentStatus}`;
-            const resp = await fetch(url);
+            const resp = await fetch(`/api/matches?league=${currentLeague}&status=${currentStatus}`);
             const data = await resp.json();
 
-            document.getElementById('statusText').textContent =
-                data.is_mock ? '🧪 模拟模式' : '📡 实时模式';
-            document.getElementById('statusDot').className =
-                'status-dot ' + (data.is_mock ? 'yellow' : 'green');
-            document.getElementById('matchCount').textContent = data.total ?? data.matches.length;
+            // Update status
+            const isMock = data.is_mock;
+            document.getElementById('statusDot').className = 'status-indicator ' + (isMock ? 'mock' : 'online');
+            document.getElementById('statusText').textContent = isMock ? '实时' : '在线';
 
-            if (data.matches.length === 0) {
-                grid.innerHTML = '<div class="empty-state">📭 暂无比赛数据</div>';
+            // Update counts
+            document.getElementById('heroTotal').textContent = data.total || 0;
+
+            const matches = data.matches || [];
+            const liveCount = matches.filter(m => m.status_sort <= 2).length;
+            const upcomingCount = matches.filter(m => m.status_sort === 3).length;
+            const finishedCount = matches.filter(m => m.status_sort === 4).length;
+
+            document.getElementById('heroLive').textContent = liveCount;
+            document.getElementById('heroUpcoming').textContent = upcomingCount;
+            document.getElementById('countAll').textContent = data.total || 0;
+            document.getElementById('countLive').textContent = liveCount;
+            document.getElementById('countUpcoming').textContent = upcomingCount;
+            document.getElementById('countFinished').textContent = finishedCount;
+
+            if (matches.length === 0) {
+                container.innerHTML = '<div class="empty-state"><span class="empty-icon">📭</span><span>暂无比赛数据</span></div>';
                 return;
             }
 
-            grid.innerHTML = renderTimeline(data.matches);
+            // Group by date
+            const groups = {};
+            matches.forEach(m => {
+                const key = getDateKey(m.match_date);
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(m);
+            });
+
+            const sorted = Object.entries(groups).sort(([a], [b]) => dateOrder(a) - dateOrder(b));
+
+            container.innerHTML = sorted.map(([key, items]) => `
+                <div class="date-group">
+                    <div class="date-header">${dateLabel(key)} <span class="date-count">${items.length} 场</span></div>
+                    <div class="match-cards">${items.map(m => renderMatch(m)).join('')}</div>
+                </div>
+            `).join('');
+
+            // Animate in
             requestAnimationFrame(() => {
-                document.querySelectorAll('.match-row.score-changed').forEach(card => {
-                    card.classList.add('flash-score');
+                document.querySelectorAll('.match-card').forEach((el, i) => {
+                    el.style.setProperty('--i', i);
+                    el.classList.add('animate-in');
                 });
             });
+
         } catch (e) {
-            grid.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+            container.innerHTML = `<div class="empty-state"><span class="empty-icon">❌</span><span>加载失败: ${e.message}</span></div>`;
         }
     }
 
-    function renderTimeline(matches) {
-        const grouped = matches.reduce((acc, match) => {
-            const key = getDateKey(match.match_date);
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(match);
-            return acc;
-        }, {});
-
-        return Object.entries(grouped)
-            .sort(([a], [b]) => dateGroupOrder(a) - dateGroupOrder(b))
-            .map(([dateKey, items]) => `
-            <section class="date-group fade-in">
-                <div class="date-header">
-                    <span>${dateLabel(dateKey)}</span>
-                    <strong>${items.length} 场</strong>
-                </div>
-                <div class="match-rows">
-                    ${items.map((match, index) => renderMatchRow(match, index)).join('')}
-                </div>
-            </section>
-        `).join('');
-    }
-
-    function renderMatchRow(m, index) {
+    function renderMatch(m) {
         const isLive = m.status_sort <= 2;
         const isFinished = m.status_sort === 4;
         const isUpcoming = m.status_sort === 3;
-        const matchTime = formatTime(m.match_date);
-        const leagueClass = leagueClassName(m.league_id);
-        const scoreKey = `${m.home_goals ?? ''}-${m.away_goals ?? ''}`;
-        const oldScore = previousScores.get(m.fixture_id);
-        const scoreChanged = oldScore && oldScore !== scoreKey && !isUpcoming;
-        previousScores.set(m.fixture_id, scoreKey);
 
         let badge = '';
-        if (isLive) badge = `<span class="match-minute"><span class="elapsed-time">${m.elapsed || 0}'</span></span>`;
-        else if (isFinished) badge = `<span class="match-minute muted">FT</span>`;
-        else badge = `<span class="match-minute">${matchTime}</span>`;
+        if (isLive) badge = `<span class="match-badge live"><span class="live-dot"></span> ${m.elapsed || 0}'</span>`;
+        else if (isFinished) badge = `<span class="match-badge finished">FT</span>`;
+        else {
+            const t = formatTime(m.match_date);
+            badge = `<span class="match-badge upcoming">${t}</span>`;
+        }
 
-        const scoreHtml = isUpcoming ? `
-            <div class="compact-score upcoming">vs</div>
-        ` : `
-            <div class="compact-score">
-                <span class="${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
-                <span class="score-dash">-</span>
-                <span class="${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
-            </div>`;
+        let scoreDisplay = '';
+        if (isUpcoming) {
+            scoreDisplay = `
+                <div class="score-upcoming">
+                    <span>VS</span>
+                    <small>${formatTime(m.match_date)}</small>
+                </div>`;
+        } else {
+            const hw = (m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals) ? 'winner' : '';
+            const aw = (m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals) ? 'winner' : '';
+            scoreDisplay = `
+                <div class="score-display">
+                    <span class="score-num home ${hw}">${m.home_goals ?? '?'}</span>
+                    <span class="score-sep">:</span>
+                    <span class="score-num away ${aw}">${m.away_goals ?? '?'}</span>
+                </div>`;
+        }
 
-        const half = m.halftime_home !== null && m.halftime_away !== null
-            ? `<div class="half-score">HT ${m.halftime_home}:${m.halftime_away}</div>`
-            : '';
-        const latestGoal = m.latest_goal
-            ? `<span class="latest-goal-inline">${escapeHtml(m.latest_goal)}</span>`
-            : '';
-        const statusClass = isLive ? 'is-live' : (isFinished ? 'is-finished' : 'is-upcoming');
-        const round = m.round ? ` · ${escapeHtml(m.round)}` : '';
-        const footerLeft = [half, latestGoal].filter(Boolean).join('');
+        const events = (m.events || []).filter(e => e.type === 'Goal').slice(-2);
+        const eventStr = events.map(e => `⚽ ${e.time}' ${e.player || ''}`).join(' · ');
+        const homeTeam = renderTeam(m, 'home');
+        const awayTeam = renderTeam(m, 'away');
+        const predictionHtml = isUpcoming ? renderPredictionSummary(m) : '';
 
         return `
-            <a href="/match/${m.fixture_id}" class="match-row ${statusClass} ${leagueClass} ${scoreChanged ? 'score-changed' : ''}" data-fixture-id="${m.fixture_id}" data-score="${scoreKey}">
-                ${isLive ? '<span class="live-pulse" aria-hidden="true"></span>' : ''}
-                <div class="match-row-top">
-                    <span class="league-name"><span class="league-dot"></span>${escapeHtml(m.league_name)}${round}</span>
+            <a href="/match/${m.fixture_id}" class="match-card ${isLive ? 'card-live' : isFinished ? 'card-finished' : 'card-upcoming'}" style="--accent: ${m.league_color}">
+                <div class="card-top">
+                    <span class="card-league"><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${esc(m.league_name)}${m.round ? ' · ' + esc(m.round) : ''}</span>
                     ${badge}
                 </div>
-                <div class="match-row-main">
-                    <div class="team home">${escapeHtml(m.home_team)}</div>
-                    ${scoreHtml}
-                    <div class="team away">${escapeHtml(m.away_team)}</div>
+                <div class="card-main">
+                    ${homeTeam}
+                    ${scoreDisplay}
+                    ${awayTeam}
                 </div>
-                <div class="match-row-footer">
-                    <span class="match-note">${footerLeft || (isUpcoming ? '开赛时间 ' + matchTime : '')}</span>
-                    <span class="venue">${escapeHtml(m.venue || '')}</span>
+                <div class="card-bottom">
+                    <span class="card-meta">${m.halftime_home !== null ? 'HT ' + m.halftime_home + ':' + m.halftime_away : ''}${eventStr ? ' · ' + eventStr : ''}</span>
+                    <span class="card-venue">${esc(m.venue || '')}</span>
                 </div>
+                ${predictionHtml}
             </a>
         `;
     }
 
-    function loadingSkeleton(count = 4) {
-        return Array.from({ length: count }, () => `
-            <div class="skeleton-card" aria-hidden="true">
-                <span></span><span></span><span></span>
+    function renderPredictionSummary(m) {
+        const p = m.prediction;
+        if (!p || p.insufficient_data) {
+            const corners = renderCornerPrediction(m.corner_prediction);
+            return `
+                <div class="prediction-box prediction-empty">
+                    <div class="prediction-main">暂无足够数据预测</div>
+                    ${corners}
+                </div>
+            `;
+        }
+
+        const winnerSide = p.winner === 'away' ? 'away' : p.winner === 'draw' ? 'draw' : 'home';
+        const winnerName = winnerSide === 'draw' ? '平局' : displayTeamName(m, winnerSide);
+        const factor = (p.factors || [])[0];
+        const statFactor = (p.factors || []).find(item => item.type === 'stat') || factor;
+        const mood = p.prediction_detail || '赛前数据接近';
+        const context = predictionContextLine(m, p);
+        const corners = renderCornerPrediction(m.corner_prediction);
+        return `
+            <div class="prediction-box">
+                <div class="prediction-main">预测 ${esc(winnerName)}${winnerSide === 'draw' ? '' : ' 获胜'} <strong>(${p.confidence}%)</strong></div>
+                ${statFactor ? `<div class="prediction-stat">📊 ${esc(statFactor.text)}</div>` : ''}
+                ${context ? `<div class="prediction-stat">${context}</div>` : ''}
+                ${corners}
+                <div class="prediction-detail">${factorIcon(factor)} ${esc(mood)}</div>
             </div>
-        `).join('');
+        `;
     }
 
-    async function refreshData() {
-        const btn = document.getElementById('refreshBtn');
-        btn.classList.add('is-refreshing');
-        await loadMatches();
-        setTimeout(() => btn.classList.remove('is-refreshing'), 450);
+    function renderCornerPrediction(c) {
+        if (!c || !c.first_half || !c.full_time) return '';
+        return `<div class="prediction-stat">🚩 角球：上半场 ${cornerRange(c.first_half)} / 全场 ${cornerRange(c.full_time)}</div>`;
     }
 
-    function getDateKey(value) {
-        if (!value) return 'unknown';
-        const d = new Date(value);
-        if (Number.isNaN(d.getTime())) return 'unknown';
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    function cornerRange(range) {
+        if (range.low === undefined || range.high === undefined) return '待定';
+        return `${range.low}-${range.high}`;
     }
 
-    function dateLabel(dateKey) {
-        if (dateKey === 'unknown') return '待定日期';
-        const today = getDateKey(new Date());
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        if (dateKey === today) return '今天';
-        if (dateKey === getDateKey(tomorrow)) return '明天';
-        if (dateKey === getDateKey(yesterday)) return '昨天';
-        const d = new Date(dateKey + 'T00:00:00');
-        return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' });
+    function predictionContextLine(m, p) {
+        const h = p.h2h_summary || {};
+        const inj = p.injury_summary || {};
+        const home = shortTeamName(m, 'home');
+        const away = shortTeamName(m, 'away');
+        const h2h = h.total ? `H2H ${home} ${h.home_wins}-${h.away_wins} ${away}` : 'H2H 暂无';
+        const injuries = `伤病 ${home} ${inj.home_count || 0}人/${away} ${inj.away_count || 0}人`;
+        return `${h2h} · ${injuries}`;
     }
 
-    function formatTime(value) {
-        if (!value) return '待定';
-        const d = new Date(value);
-        if (Number.isNaN(d.getTime())) return '待定';
-        return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    function shortTeamName(m, side) {
+        return m[`${side}_team_en`] || m[`${side}_team`] || '';
     }
 
-    function dateGroupOrder(dateKey) {
-        if (dateKey === 'unknown') return Number.MAX_SAFE_INTEGER;
-        const today = getDateKey(new Date());
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        if (dateKey === today) return 0;
-        if (dateKey === getDateKey(tomorrow)) return 1;
-        if (dateKey === getDateKey(yesterday)) return 2;
-        const d = new Date(dateKey + 'T00:00:00');
-        return Number.isNaN(d.getTime()) ? Number.MAX_SAFE_INTEGER : 10 + d.getTime();
+    function displayTeamName(m, side) {
+        const flag = m[`${side}_flag`] || '';
+        const name = m[`${side}_team_en`] || m[`${side}_team`] || '';
+        return `${flag ? flag + ' ' : ''}${name}`;
     }
 
-    function leagueClassName(value) {
-        const safe = String(value ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '');
-        return `league-${safe || 'default'}`;
+    function factorIcon(factor) {
+        if (!factor) return '🟡';
+        if (factor.type === 'positive') return '🟢';
+        if (factor.type === 'negative') return '🔴';
+        return '📈';
     }
 
-    function escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"']/g, s => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[s]));
+    function renderTeam(m, side) {
+        const rawName = m[`${side}_team`] || '';
+        const cnName = m[`${side}_team_cn`] || '';
+        const enName = m[`${side}_team_en`] || '';
+        const flag = m[`${side}_flag`] || '';
+        const rawIsChinese = hasChinese(rawName);
+        const showFlagLayout = Boolean(flag);
+        const primary = showFlagLayout ? (enName || rawName) : (rawIsChinese ? rawName : (enName || rawName));
+        const secondary = showFlagLayout ? (cnName || (rawIsChinese ? rawName : '')) : (rawIsChinese ? enName : cnName);
+        const flagHtml = showFlagLayout ? `<span class="team-flag">${esc(flag)}</span>` : '';
+        const secondaryHtml = secondary && secondary !== primary
+            ? `<div class="team-secondary">${esc(secondary)}</div>`
+            : '';
+
+        return `
+            <div class="card-team ${side}">
+                <div class="team-primary">${flagHtml}<span>${esc(primary)}</span></div>
+                ${secondaryHtml}
+            </div>
+        `;
     }
 
-    setInterval(loadMatches, 30000);
+    function hasChinese(v) {
+        return /[\u4e00-\u9fff]/.test(String(v || ''));
+    }
+
+    function getDateKey(v) {
+        if (!v) return 'unknown';
+        const d = new Date(v);
+        return isNaN(d) ? 'unknown' : d.toISOString().slice(0, 10);
+    }
+
+    function dateLabel(key) {
+        if (key === 'unknown') return '待定';
+        const today = new Date().toISOString().slice(0, 10);
+        if (key === today) return '📅 今天';
+        const y = new Date(); y.setDate(y.getDate() - 1);
+        if (key === y.toISOString().slice(0, 10)) return '📅 昨天';
+        const t = new Date(); t.setDate(t.getDate() + 1);
+        if (key === t.toISOString().slice(0, 10)) return '📅 明天';
+        const d = new Date(key + 'T00:00:00');
+        return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+    }
+
+    function dateOrder(key) {
+        if (key === 'unknown') return 999;
+        return new Date(key + 'T00:00:00').getTime();
+    }
+
+    function formatTime(v) {
+        if (!v) return '待定';
+        const d = new Date(v);
+        return isNaN(d) ? '待定' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function esc(v) {
+        return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+    }
+
     loadMatches();
 </script>
 {% endblock %}

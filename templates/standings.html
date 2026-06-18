@@ -1,29 +1,50 @@
 {% extends "base.html" %}
 
-{% block title %}积分榜 — K38 足球监控{% endblock %}
+{% block title %}积分榜 — K38 足球{% endblock %}
 
 {% block content %}
-<div class="filter-bar">
-    <button class="filter-btn active" data-league="all">全部联赛</button>
-    {% for lid, color in leagues.items() %}
-    <button class="filter-btn league-{{ lid }}" data-league="{{ lid }}">
-        <span class="league-dot"></span>
-        {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
-    </button>
-    {% endfor %}
-</div>
+<div class="page-shell">
+    <section class="hero-strip">
+        <div>
+            <div class="hero-kicker">🏆 K38 足球</div>
+            <h1 class="hero-title">联赛积分榜</h1>
+            <p class="hero-subtitle">排名、净胜球和积分实时汇总</p>
+        </div>
+        <div class="hero-metrics">
+            <div class="metric"><strong id="metricLeagues">0</strong><span>联赛</span></div>
+            <div class="metric"><strong id="metricTeams">0</strong><span>球队</span></div>
+            <div class="metric"><strong id="metricTop">0</strong><span>最高分</span></div>
+        </div>
+    </section>
 
-<div class="refresh-bar">
-    <div class="match-summary">
-        <span class="match-count">积分榜</span>
-        <span class="update-time">更新于: <span id="updateTime">—</span></span>
+    <section class="control-card">
+        <div class="control-label">
+            <span>联赛筛选</span>
+            <small>Standings</small>
+        </div>
+        <div class="filter-bar">
+            <button class="filter-btn active" data-league="all" style="--league-color: var(--brand)">全部联赛</button>
+            {% for lid, color in leagues.items() %}
+            <button class="filter-btn" data-league="{{ lid }}" style="--league-color: {{ color }}">
+                <span class="league-dot" style="background: {{ color }}"></span>
+                {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
+            </button>
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="refresh-bar">
+        <div class="match-summary">
+            <span class="match-count">积分榜</span>
+            <span class="update-time">更新于 <span id="updateTime">—</span></span>
+        </div>
+        <button class="refresh-btn" id="refreshBtn" type="button" onclick="refreshStandings()">
+            <span class="refresh-icon">↻</span> 刷新
+        </button>
     </div>
-    <button class="refresh-btn" id="refreshBtn" type="button" onclick="refreshStandings()">🔄 刷新</button>
-</div>
 
-<div class="standings-list" id="standingsList">
-    <div class="skeleton-table" aria-label="正在加载积分榜">
-        <span></span><span></span><span></span><span></span><span></span>
+    <div class="standings-list" id="standingsList">
+        <div class="loading">加载中...</div>
     </div>
 </div>
 {% endblock %}
@@ -43,48 +64,53 @@
 
     async function loadStandings() {
         const list = document.getElementById('standingsList');
-        list.innerHTML = '<div class="skeleton-table" aria-label="正在加载积分榜"><span></span><span></span><span></span><span></span><span></span></div>';
+        list.innerHTML = '<div class="loading">加载中...</div>';
 
         try {
             const resp = await fetch(`/api/standings?league=${currentLeague}`);
             const data = await resp.json();
 
-            document.getElementById('statusText').textContent =
-                data.is_mock ? '🧪 模拟模式' : '📡 实时模式';
-            document.getElementById('statusDot').className =
-                'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+            document.getElementById('statusText').textContent = data.is_mock ? '实时' : '在线';
+            document.getElementById('statusDot').className = 'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+            document.getElementById('updateTime').textContent = data.updated_at || new Date().toLocaleString('zh-CN');
+            updateMetrics(data.standings || []);
 
-            if (data.standings.length === 0) {
+            if (!data.standings || data.standings.length === 0) {
                 list.innerHTML = '<div class="empty-state">📭 暂无已完赛积分数据</div>';
                 return;
             }
 
             list.innerHTML = data.standings.map(renderTable).join('');
         } catch (e) {
-            list.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+            list.innerHTML = '<div class="error-state">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
+    function updateMetrics(tables) {
+        const teams = tables.reduce((sum, table) => sum + table.teams.length, 0);
+        const top = tables.reduce((best, table) => {
+            const tableBest = table.teams.reduce((max, team) => Math.max(max, team.points), 0);
+            return Math.max(best, tableBest);
+        }, 0);
+        document.getElementById('metricLeagues').textContent = tables.length;
+        document.getElementById('metricTeams').textContent = teams;
+        document.getElementById('metricTop').textContent = top;
+    }
+
     function renderTable(table) {
-        const leagueClass = leagueClassName(table.league_id);
-        const totalTeams = table.teams.length;
         return `
-            <section class="standings-card fade-in ${leagueClass}">
+            <section class="standings-card" style="--league-color: ${table.league_color}">
                 <div class="standings-header">
                     <div>
                         <h1>${escapeHtml(table.league_name)}</h1>
-                        <span>${table.teams.length} 支球队</span>
-                    </div>
-                    <div class="standings-legend">
-                        <span><i class="zone-dot top"></i>欧冠区</span>
-                        <span><i class="zone-dot drop"></i>降级区</span>
+                        <span>${table.teams.length} 支球队 · 按积分 / 净胜球排序</span>
                     </div>
                 </div>
                 <div class="standings-table-wrap">
                     <table class="standings-table">
                         <thead>
                             <tr>
-                                <th>#</th>
+                                <th>排名</th>
                                 <th>球队</th>
                                 <th>赛</th>
                                 <th>胜</th>
@@ -94,15 +120,13 @@
                                 <th>失</th>
                                 <th>净</th>
                                 <th>分</th>
-                                <th>近况</th>
-                                <th>变</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${table.teams.map(team => `
-                                <tr class="${standingZone(team.rank, totalTeams)}">
-                                    <td class="rank">${rankLabel(team.rank)}</td>
-                                    <td class="team-cell"><span class="team-color"></span><span class="team-name-standings">${escapeHtml(team.team)}</span></td>
+                                <tr>
+                                    <td class="rank ${team.rank <= 3 ? 'medal' : ''}">${rankLabel(team.rank)}</td>
+                                    <td class="team-cell"><span class="team-color" style="background: ${table.league_color}"></span>${escapeHtml(team.team)}</td>
                                     <td>${team.played}</td>
                                     <td>${team.wins}</td>
                                     <td>${team.draws}</td>
@@ -111,8 +135,6 @@
                                     <td>${team.goals_against}</td>
                                     <td class="${team.goal_difference > 0 ? 'positive' : team.goal_difference < 0 ? 'negative' : ''}">${team.goal_difference}</td>
                                     <td class="points">${team.points}</td>
-                                    <td>${formDots(team)}</td>
-                                    <td>${trendIcon(team)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -126,39 +148,14 @@
         const btn = document.getElementById('refreshBtn');
         btn.classList.add('is-refreshing');
         await loadStandings();
-        setTimeout(() => btn.classList.remove('is-refreshing'), 450);
+        setTimeout(() => btn.classList.remove('is-refreshing'), 500);
     }
 
     function rankLabel(rank) {
+        if (rank === 1) return '🥇';
+        if (rank === 2) return '🥈';
+        if (rank === 3) return '🥉';
         return rank;
-    }
-
-    function standingZone(rank, totalTeams) {
-        if (rank <= 4) return 'zone-top';
-        if (rank > Math.max(totalTeams - 3, 0)) return 'zone-relegation';
-        return '';
-    }
-
-    function formDots(team) {
-        const sequence = [];
-        for (let i = 0; i < Math.min(team.wins || 0, 3); i += 1) sequence.push('w');
-        for (let i = 0; i < Math.min(team.draws || 0, 2); i += 1) sequence.push('d');
-        for (let i = 0; i < Math.min(team.losses || 0, 3); i += 1) sequence.push('l');
-        const dots = sequence.slice(-5);
-        while (dots.length < 5) dots.unshift('empty');
-        return `<span class="form-dots">${dots.map(item => `<i class="${item}"></i>`).join('')}</span>`;
-    }
-
-    function trendIcon(team) {
-        const delta = team.rank_change ?? team.rank_delta ?? team.movement ?? 0;
-        if (delta > 0) return '<span class="trend up">▲</span>';
-        if (delta < 0) return '<span class="trend down">▼</span>';
-        return '<span class="trend flat">→</span>';
-    }
-
-    function leagueClassName(value) {
-        const safe = String(value ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '');
-        return `league-${safe || 'default'}`;
     }
 
     function escapeHtml(value) {

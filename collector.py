@@ -36,6 +36,38 @@ LIVE_STATUS = {
 }
 
 
+def _utcnow():
+    return datetime.utcnow()
+
+
+def _utcnow_iso():
+    return _utcnow().isoformat(timespec="seconds")
+
+
+def _parse_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _ordered_team_pair(team1_id, team2_id):
+    if team1_id is None or team2_id is None:
+        return None
+    team1_id = int(team1_id)
+    team2_id = int(team2_id)
+    return (team1_id, team2_id) if team1_id <= team2_id else (team2_id, team1_id)
+
+
+def _cache_is_fresh(fetched_at, ttl_seconds):
+    fetched = _parse_datetime(fetched_at)
+    if not fetched:
+        return False
+    return (_utcnow() - fetched).total_seconds() < ttl_seconds
+
+
 def api_call(endpoint, params=None):
     """Call API-Football with configured retry and exponential backoff."""
     if USE_MOCK:
@@ -74,6 +106,9 @@ def api_call(endpoint, params=None):
 
 def save_match(match):
     """Write a match to SQLite and emit goal notifications for score changes."""
+    stats_json = json.dumps(match.get("stats", {}), ensure_ascii=False)
+    events_json = json.dumps(match.get("events", []), ensure_ascii=False)
+
     with get_db() as conn:
         old = conn.execute(
             "SELECT home_goals, away_goals FROM football_matches WHERE fixture_id = ?",
@@ -94,8 +129,8 @@ def save_match(match):
                  fulltime_home, fulltime_away,
                  extra_home, extra_away,
                  penalty_home, penalty_away,
-                 referee, venue, stats, events, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                 referee, venue, stats, events, details_fetched_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
             ON CONFLICT(fixture_id) DO UPDATE SET
                 league_id=excluded.league_id,
                 league_name=excluded.league_name,
@@ -120,8 +155,17 @@ def save_match(match):
                 penalty_away=excluded.penalty_away,
                 referee=excluded.referee,
                 venue=excluded.venue,
-                stats=excluded.stats,
-                events=excluded.events,
+                stats=CASE
+                    WHEN excluded.details_fetched_at IS NULL AND excluded.stats = '{}'
+                    THEN football_matches.stats
+                    ELSE excluded.stats
+                END,
+                events=CASE
+                    WHEN excluded.details_fetched_at IS NULL AND excluded.events = '[]'
+                    THEN football_matches.events
+                    ELSE excluded.events
+                END,
+                details_fetched_at=COALESCE(excluded.details_fetched_at, football_matches.details_fetched_at),
                 updated_at=datetime('now')
             """,
             (
@@ -149,8 +193,9 @@ def save_match(match):
                 match.get("penalty_away"),
                 match.get("referee", ""),
                 match.get("venue", ""),
-                json.dumps(match.get("stats", {}), ensure_ascii=False),
-                json.dumps(match.get("events", []), ensure_ascii=False),
+                stats_json,
+                events_json,
+                match.get("details_fetched_at"),
             ),
         )
 
@@ -223,41 +268,359 @@ def collect_live_matches():
         for fix in data["response"]:
             league_id = fix.get("league", {}).get("id")
             if league_id in LEAGUES:
-                save_match(_parse_fixture(fix))
+                match = _parse_fixture(fix)
+                save_match(match)
+                fetch_and_save_detail(match["fixture_id"])
                 count += 1
                 time.sleep(settings.API_LIVE_DELAY)
     return count
 
 
 def collect_schedule():
-    """Collect recent, current, and upcoming fixtures for configured leagues."""
+    """Collect fixtures using a tighter detail policy around match day."""
     if USE_MOCK:
         return 0
 
     count = 0
     today = datetime.now().date()
     start = today - timedelta(days=settings.FINISHED_LOOKBACK_DAYS)
-    end = today + timedelta(days=settings.LOOKAHEAD_DAYS)
+    end = today + timedelta(days=min(settings.LOOKAHEAD_DAYS, 3))
     current = start
 
     while current <= end:
         date_value = current.strftime("%Y-%m-%d")
+        days_ahead = (current - today).days
+        if days_ahead >= 4:
+            current += timedelta(days=1)
+            continue
+
         for league_id in LEAGUES:
             season = _season_for_date(current, league_id)
             data = api_call("fixtures", {"league": league_id, "season": season, "date": date_value})
             if data and "response" in data:
                 for fix in data["response"]:
-                    save_match(_parse_fixture(fix))
+                    match = _parse_fixture(fix)
+                    save_match(match)
+                    if current <= today and _should_fetch_detail(match):
+                        fetch_and_save_detail(match["fixture_id"])
                     count += 1
             time.sleep(settings.API_BASE_DELAY)
         current += timedelta(days=1)
 
+    collect_finished_match_details()
     return count
 
 
 def collect_from_api():
     """Collect live fixtures and configured schedule window."""
     return collect_live_matches() + collect_schedule()
+
+
+def ensure_prediction_context_for_fixture(fixture, force=False):
+    """Refresh H2H and injury context for one upcoming fixture when stale."""
+    if not fixture:
+        return {"h2h_refreshed": False, "injury_refreshed": 0}
+
+    home_team_id = fixture.get("home_team_id")
+    away_team_id = fixture.get("away_team_id")
+    refreshed = {"h2h_refreshed": False, "injury_refreshed": 0}
+
+    if home_team_id and away_team_id:
+        refreshed["h2h_refreshed"] = fetch_and_save_h2h(home_team_id, away_team_id, force=force)
+
+    for team_id in (home_team_id, away_team_id):
+        if team_id and fetch_and_save_injuries(team_id, force=force):
+            refreshed["injury_refreshed"] += 1
+
+    return refreshed
+
+
+def collect_prediction_context(force=False, limit=20):
+    """Refresh cached H2H and injury data for upcoming fixtures."""
+    if USE_MOCK:
+        return {"fixtures": 0, "h2h": 0, "injuries": 0}
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM football_matches
+            WHERE home_goals IS NULL
+              AND away_goals IS NULL
+            ORDER BY match_date
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+
+    totals = {"fixtures": 0, "h2h": 0, "injuries": 0}
+    for row in rows:
+        fixture = dict(row)
+        result = ensure_prediction_context_for_fixture(fixture, force=force)
+        totals["fixtures"] += 1
+        totals["h2h"] += 1 if result["h2h_refreshed"] else 0
+        totals["injuries"] += result["injury_refreshed"]
+        if result["h2h_refreshed"] or result["injury_refreshed"]:
+            time.sleep(settings.API_BASE_DELAY)
+
+    return totals
+
+
+def refresh_prediction_context_daily():
+    """Run the prediction context refresh at most once per configured day."""
+    if USE_MOCK:
+        return {"fixtures": 0, "h2h": 0, "injuries": 0, "skipped": True}
+
+    now = datetime.now()
+    scheduled = now.replace(
+        hour=int(settings.PREDICTION_CONTEXT_REFRESH_HOUR),
+        minute=int(settings.PREDICTION_CONTEXT_REFRESH_MINUTE),
+        second=0,
+        microsecond=0,
+    )
+    refresh_key = f"prediction_context:{now.date().isoformat()}"
+    if now < scheduled:
+        return {"fixtures": 0, "h2h": 0, "injuries": 0, "skipped": True}
+
+    with get_db() as conn:
+        done = conn.execute(
+            "SELECT 1 FROM football_prediction_refreshes WHERE refresh_key = ?",
+            (refresh_key,),
+        ).fetchone()
+        if done:
+            return {"fixtures": 0, "h2h": 0, "injuries": 0, "skipped": True}
+
+    totals = collect_prediction_context(force=False)
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO football_prediction_refreshes (refresh_key, refreshed_at)
+            VALUES (?, ?)
+            """,
+            (refresh_key, _utcnow_iso()),
+        )
+    totals["skipped"] = False
+    return totals
+
+
+def fetch_and_save_h2h(team1_id, team2_id, force=False):
+    """Fetch and cache the latest head-to-head fixtures for two teams."""
+    pair = _ordered_team_pair(team1_id, team2_id)
+    if USE_MOCK or not pair:
+        return False
+
+    cached = get_h2h_cache(team1_id, team2_id)
+    if not force and cached and cached.get("fresh"):
+        return False
+
+    data = api_call("fixtures/headtohead", {"h2h": f"{pair[0]}-{pair[1]}", "last": 10})
+    response = data.get("response", []) if data else []
+    if not isinstance(response, list):
+        response = []
+
+    stats = _parse_h2h_response(response, pair[0], pair[1])
+    fetched_at = _utcnow_iso()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO football_h2h_cache
+                (team1_id, team2_id, fixture_count, team1_wins, team2_wins, draws, fixtures, fetched_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(team1_id, team2_id) DO UPDATE SET
+                fixture_count=excluded.fixture_count,
+                team1_wins=excluded.team1_wins,
+                team2_wins=excluded.team2_wins,
+                draws=excluded.draws,
+                fixtures=excluded.fixtures,
+                fetched_at=excluded.fetched_at,
+                updated_at=datetime('now')
+            """,
+            (
+                pair[0],
+                pair[1],
+                stats["total"],
+                stats["team1_wins"],
+                stats["team2_wins"],
+                stats["draws"],
+                json.dumps(stats["fixtures"], ensure_ascii=False),
+                fetched_at,
+            ),
+        )
+    logger.info("h2h cache refreshed for %s-%s: %s fixtures", pair[0], pair[1], stats["total"])
+    return True
+
+
+def get_h2h_cache(team1_id, team2_id):
+    pair = _ordered_team_pair(team1_id, team2_id)
+    if not pair:
+        return None
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM football_h2h_cache WHERE team1_id = ? AND team2_id = ?",
+            pair,
+        ).fetchone()
+    if not row:
+        return None
+
+    cached = dict(row)
+    try:
+        fixtures = json.loads(cached.get("fixtures") or "[]")
+    except json.JSONDecodeError:
+        fixtures = []
+
+    team1_wins = int(cached.get("team1_wins") or 0)
+    team2_wins = int(cached.get("team2_wins") or 0)
+    draws = int(cached.get("draws") or 0)
+    total = int(cached.get("fixture_count") or (team1_wins + team2_wins + draws))
+    return {
+        "team1_id": pair[0],
+        "team2_id": pair[1],
+        "total": total,
+        "team1_wins": team1_wins,
+        "team2_wins": team2_wins,
+        "draws": draws,
+        "fixtures": fixtures,
+        "fetched_at": cached.get("fetched_at"),
+        "fresh": _cache_is_fresh(cached.get("fetched_at"), settings.H2H_CACHE_SECONDS),
+    }
+
+
+def fetch_and_save_injuries(team_id, season=None, force=False):
+    """Fetch and cache current injuries for one team and season."""
+    if USE_MOCK or not team_id:
+        return False
+
+    season = int(season or settings.PREDICTION_CONTEXT_SEASON)
+    cached = get_team_injuries(team_id, season=season)
+    if not force and cached.get("fresh"):
+        return False
+
+    data = api_call("injuries", {"team": int(team_id), "season": season})
+    response = data.get("response", []) if data else []
+    if not isinstance(response, list):
+        response = []
+
+    fetched_at = _utcnow_iso()
+    injuries = [_parse_injury(item, int(team_id), season, fetched_at) for item in response]
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM football_injuries WHERE team_id = ? AND season = ?",
+            (int(team_id), season),
+        )
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO football_injuries
+                (team_id, season, player_id, player_name, injury_type, reason, expected_return, raw, fetched_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            [
+                (
+                    injury["team_id"],
+                    injury["season"],
+                    injury["player_id"],
+                    injury["player_name"],
+                    injury["injury_type"],
+                    injury["reason"],
+                    injury["expected_return"],
+                    injury["raw"],
+                    injury["fetched_at"],
+                )
+                for injury in injuries
+            ],
+        )
+        if not injuries:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO football_injuries
+                    (team_id, season, player_name, injury_type, reason, expected_return, raw, fetched_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (int(team_id), season, "__NO_CURRENT_INJURIES__", "", "", "", "{}", fetched_at),
+            )
+
+    logger.info("injury cache refreshed for team %s season %s: %s players", team_id, season, len(injuries))
+    return True
+
+
+def get_team_injuries(team_id, season=None):
+    season = int(season or settings.PREDICTION_CONTEXT_SEASON)
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM football_injuries
+            WHERE team_id = ? AND season = ?
+            ORDER BY player_name
+            """,
+            (int(team_id), season),
+        ).fetchall()
+
+    if not rows:
+        return {"team_id": int(team_id), "season": season, "injuries": [], "fetched_at": None, "fresh": False}
+
+    fetched_at = rows[0]["fetched_at"]
+    injuries = []
+    for row in rows:
+        item = dict(row)
+        if item["player_name"] == "__NO_CURRENT_INJURIES__":
+            continue
+        injuries.append({
+            "player_id": item.get("player_id"),
+            "player_name": item.get("player_name"),
+            "injury_type": item.get("injury_type") or item.get("reason") or "Injury",
+            "reason": item.get("reason") or "",
+            "expected_return": item.get("expected_return") or "",
+        })
+
+    return {
+        "team_id": int(team_id),
+        "season": season,
+        "injuries": injuries,
+        "fetched_at": fetched_at,
+        "fresh": _cache_is_fresh(fetched_at, settings.INJURY_CACHE_SECONDS),
+    }
+
+
+def fetch_and_save_detail(fixture_id):
+    """Fetch fixtures?id=xxx and persist detailed events/statistics once available."""
+    if USE_MOCK or not fixture_id:
+        return False
+
+    data = api_call("fixtures", {"id": fixture_id})
+    response = data.get("response", []) if data else []
+    if not response:
+        return False
+
+    match = _parse_fixture(response[0], details_fetched=True)
+    save_match(match)
+    return True
+
+
+def collect_finished_match_details(limit=50):
+    """Backfill detail data for finished matches that have not been fetched yet."""
+    if USE_MOCK:
+        return 0
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT fixture_id
+            FROM football_matches
+            WHERE status LIKE '%Finished%'
+              AND details_fetched_at IS NULL
+            ORDER BY match_date DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+
+    count = 0
+    for row in rows:
+        if fetch_and_save_detail(row["fixture_id"]):
+            count += 1
+            time.sleep(settings.API_BASE_DELAY)
+    return count
 
 
 def _season_for_date(value, league_id):
@@ -268,7 +631,30 @@ def _season_for_date(value, league_id):
     return value.year if value.month >= 7 else value.year - 1
 
 
-def _parse_fixture(fix):
+def _should_fetch_detail(match):
+    """Return whether this saved fixture should call the detailed endpoint now."""
+    fixture_id = match.get("fixture_id")
+    if not fixture_id:
+        return False
+    if not _is_finished_status(match.get("status")):
+        return True
+    return not _details_already_fetched(fixture_id)
+
+
+def _details_already_fetched(fixture_id):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT details_fetched_at FROM football_matches WHERE fixture_id = ?",
+            (fixture_id,),
+        ).fetchone()
+    return bool(row and row["details_fetched_at"])
+
+
+def _is_finished_status(status):
+    return bool(status and "Finished" in status)
+
+
+def _parse_fixture(fix, details_fetched=False):
     """Parse an API-Football fixture into the local match dictionary."""
     fixture = fix.get("fixture", {})
     league = fix.get("league", {})
@@ -276,9 +662,12 @@ def _parse_fixture(fix):
     goals = fix.get("goals", {}) or {}
     score = fix.get("score", {}) or {}
     status = fixture.get("status", {}) or {}
+    status_long = status.get("long", "")
     home = teams.get("home", {}) or {}
     away = teams.get("away", {}) or {}
     venue = fixture.get("venue", {}) or {}
+    statistics = _parse_statistics(fix.get("statistics", []))
+    events = _parse_events(fix.get("events", []))
 
     return {
         "fixture_id": fixture.get("id"),
@@ -287,7 +676,7 @@ def _parse_fixture(fix):
         "season": str(league.get("season", "")),
         "round": league.get("round", ""),
         "match_date": fixture.get("date", ""),
-        "status": status.get("long", ""),
+        "status": status_long,
         "elapsed": status.get("elapsed") or 0,
         "home_team": home.get("name", "?"),
         "away_team": away.get("name", "?"),
@@ -305,6 +694,236 @@ def _parse_fixture(fix):
         "penalty_away": (score.get("penalty") or {}).get("away"),
         "referee": fixture.get("referee", ""),
         "venue": venue.get("name", ""),
-        "stats": {},
-        "events": [],
+        "stats": statistics,
+        "events": events,
+        "details_fetched_at": (
+            datetime.now().isoformat(timespec="seconds")
+            if details_fetched and _is_finished_status(status_long)
+            else None
+        ),
     }
+
+
+def _parse_h2h_response(fixtures, team1_id, team2_id):
+    parsed_fixtures = []
+    team1_wins = team2_wins = draws = 0
+    for fix in fixtures or []:
+        fixture = fix.get("fixture", {}) or {}
+        teams = fix.get("teams", {}) or {}
+        goals = fix.get("goals", {}) or {}
+        league = fix.get("league", {}) or {}
+        home = teams.get("home", {}) or {}
+        away = teams.get("away", {}) or {}
+        home_id = home.get("id")
+        away_id = away.get("id")
+        home_goals = goals.get("home")
+        away_goals = goals.get("away")
+
+        winner = None
+        if home_goals is not None and away_goals is not None:
+            if int(home_goals) > int(away_goals):
+                winner = home_id
+            elif int(home_goals) < int(away_goals):
+                winner = away_id
+            else:
+                winner = "draw"
+
+        if winner == team1_id:
+            team1_wins += 1
+        elif winner == team2_id:
+            team2_wins += 1
+        elif winner == "draw":
+            draws += 1
+
+        parsed_fixtures.append({
+            "fixture_id": fixture.get("id"),
+            "date": fixture.get("date"),
+            "league": league.get("name"),
+            "home_team_id": home_id,
+            "home_team": home.get("name"),
+            "away_team_id": away_id,
+            "away_team": away.get("name"),
+            "home_goals": home_goals,
+            "away_goals": away_goals,
+            "winner": winner,
+        })
+
+    return {
+        "total": team1_wins + team2_wins + draws,
+        "team1_wins": team1_wins,
+        "team2_wins": team2_wins,
+        "draws": draws,
+        "fixtures": parsed_fixtures,
+    }
+
+
+def _parse_injury(item, team_id, season, fetched_at):
+    player = item.get("player", {}) or {}
+    fixture = item.get("fixture", {}) or {}
+    return {
+        "team_id": team_id,
+        "season": season,
+        "player_id": player.get("id"),
+        "player_name": player.get("name") or "Unknown player",
+        "injury_type": player.get("type") or item.get("type") or "",
+        "reason": player.get("reason") or item.get("reason") or "",
+        "expected_return": (
+            player.get("return")
+            or player.get("expected_return")
+            or item.get("return")
+            or item.get("expected_return")
+            or fixture.get("date")
+            or ""
+        ),
+        "raw": json.dumps(item, ensure_ascii=False),
+        "fetched_at": fetched_at,
+    }
+
+
+def _parse_statistics(statistics):
+    """Flatten API-Football team statistics for the existing match detail UI."""
+    parsed = {}
+    for team_stats in statistics or []:
+        team = team_stats.get("team", {}) or {}
+        team_key = team.get("id") or team.get("name")
+        if not team_key:
+            continue
+        for stats_block, period in _iter_statistics_blocks(team_stats):
+            for stat in stats_block:
+                stat_type, stat_period = _normalize_stat_type_and_period(stat, period)
+                if not stat_type:
+                    continue
+                value = stat.get("value")
+                label = f"{stat_period} {stat_type}" if stat_period else stat_type
+                parsed[f"{label}_{team_key}"] = "" if value is None else str(value)
+    return parsed
+
+
+def _iter_statistics_blocks(team_stats):
+    stats = team_stats.get("statistics", [])
+    if isinstance(stats, list):
+        yield stats, None
+    elif isinstance(stats, dict):
+        for key, value in stats.items():
+            period = _normalize_period_name(key)
+            if isinstance(value, list):
+                yield value, period
+            elif isinstance(value, dict) and isinstance(value.get("statistics"), list):
+                yield value["statistics"], period
+
+    for key in (
+        "first_half",
+        "firstHalf",
+        "1st_half",
+        "halftime",
+        "half_time",
+        "full_time",
+        "fullTime",
+        "match",
+        "periods",
+        "halves",
+    ):
+        value = team_stats.get(key)
+        if isinstance(value, list):
+            yield value, _normalize_period_name(key)
+        elif isinstance(value, dict):
+            period = _normalize_period_name(key)
+            if isinstance(value.get("statistics"), list):
+                yield value["statistics"], period
+            else:
+                for nested_key, nested_value in value.items():
+                    nested_period = _normalize_period_name(nested_key) or period
+                    if isinstance(nested_value, list):
+                        yield nested_value, nested_period
+                    elif isinstance(nested_value, dict) and isinstance(nested_value.get("statistics"), list):
+                        yield nested_value["statistics"], nested_period
+
+
+def _normalize_stat_type_and_period(stat, fallback_period=None):
+    raw_type = str(stat.get("type") or "").strip()
+    if not raw_type:
+        return "", fallback_period
+
+    period = _normalize_period_name(
+        stat.get("period")
+        or stat.get("half")
+        or stat.get("time")
+        or stat.get("scope")
+        or fallback_period
+    )
+    cleaned = raw_type
+    markers = (
+        ("1st Half", "First Half"),
+        ("First Half", "First Half"),
+        ("Half Time", "First Half"),
+        ("Halftime", "First Half"),
+        ("HT", "First Half"),
+        ("2nd Half", "Second Half"),
+        ("Second Half", "Second Half"),
+        ("Full Time", None),
+        ("Fulltime", None),
+        ("Match", None),
+    )
+    for marker, marker_period in markers:
+        if marker.lower() in cleaned.lower():
+            period = marker_period
+            cleaned = _remove_case_insensitive(cleaned, marker)
+    cleaned = cleaned.replace("()", "").replace("[]", "").strip(" -:()[]")
+    return cleaned, period
+
+
+def _normalize_period_name(value):
+    if not value:
+        return None
+    normalized = str(value).strip().lower().replace("_", " ").replace("-", " ")
+    if normalized in {"1", "h1", "ht"} or "first" in normalized or "1st" in normalized or "halftime" in normalized or "half time" in normalized:
+        return "First Half"
+    if normalized in {"2", "h2"} or "second" in normalized or "2nd" in normalized:
+        return "Second Half"
+    if "full" in normalized or "match" in normalized or "all" in normalized:
+        return None
+    return None
+
+
+def _remove_case_insensitive(value, needle):
+    lower_value = value.lower()
+    lower_needle = needle.lower()
+    index = lower_value.find(lower_needle)
+    if index == -1:
+        return value
+    return value[:index] + value[index + len(needle):]
+
+
+def _parse_events(events):
+    """Normalize goals, cards, and substitutions from API-Football events."""
+    parsed = []
+    for event in events or []:
+        event_type = event.get("type", "")
+        if not _is_supported_event(event_type):
+            continue
+
+        time_info = event.get("time", {}) or {}
+        team = event.get("team", {}) or {}
+        player = event.get("player", {}) or {}
+        assist = event.get("assist", {}) or {}
+        parsed.append(
+            {
+                "time": time_info.get("elapsed"),
+                "extra": time_info.get("extra"),
+                "type": event_type,
+                "detail": event.get("detail", ""),
+                "team": team.get("name", ""),
+                "team_id": team.get("id"),
+                "player": player.get("name", ""),
+                "player_id": player.get("id"),
+                "assist": assist.get("name", ""),
+                "assist_id": assist.get("id"),
+                "comments": event.get("comments", ""),
+            }
+        )
+    return parsed
+
+
+def _is_supported_event(event_type):
+    normalized = str(event_type or "").lower()
+    return normalized in {"goal", "card", "subst"} or "substitution" in normalized

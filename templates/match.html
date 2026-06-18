@@ -1,12 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}比赛详情 — K38 足球监控{% endblock %}
+{% block title %}比赛详情 — K38 足球{% endblock %}
 
 {% block content %}
 <div class="match-detail" id="matchDetail">
-    <div class="skeleton-hero" aria-label="正在加载比赛详情">
-        <span></span><span></span><span></span><span></span>
-    </div>
+    <div class="loading">加载中...</div>
 </div>
 {% endblock %}
 
@@ -14,7 +12,6 @@
 <script>
     const fixtureId = {{ fixture_id }};
     let liveRefreshTimer = null;
-    let previousScore = null;
 
     async function loadMatch() {
         const container = document.getElementById('matchDetail');
@@ -24,29 +21,26 @@
             const m = await resp.json();
 
             if (m.error) {
-                container.innerHTML = '<div class="error-state">❌ 比赛未找到</div>';
+                container.innerHTML = '<div class="error-state">比赛未找到</div>';
                 stopLiveRefresh();
                 return;
             }
 
             const isLive = m.status_sort <= 2;
             const isFinished = m.status_sort === 4;
-            const isUpcoming = m.status_sort === 3;
-            const scoreKey = `${m.home_goals ?? ''}-${m.away_goals ?? ''}`;
-            const scoreChanged = previousScore && previousScore !== scoreKey && !isUpcoming;
-            previousScore = scoreKey;
-            const leagueClass = leagueClassName(m.league_id);
+            const isUpcoming = m.status_sort === 3 && m.home_goals === null && m.away_goals === null;
 
-            document.getElementById('statusText').textContent = isLive ? '🟢 自动刷新中' : (isFinished ? '🏁 已结束' : '📋 未开始');
+            document.getElementById('statusText').textContent = isLive ? '自动刷新中' : (isFinished ? '已结束' : '未开始');
             document.getElementById('statusDot').className = 'status-dot ' + (isLive ? 'green' : 'yellow');
 
-            let badge = '';
-            if (isLive) badge = `<span class="badge live-badge"><span class="live-pulse inline" aria-hidden="true"></span>${m.elapsed}'</span>`;
-            else if (isFinished) badge = `<span class="badge finished-badge">🏁 已结束</span>`;
-            else badge = `<span class="badge upcoming-badge">📋 ${m.status || '未开始'}</span>`;
+            const badge = isLive
+                ? `<span class="badge live-badge">🟢 ${m.elapsed || 0}'</span>`
+                : isFinished
+                    ? '<span class="badge finished-badge">🏁 已结束</span>'
+                    : `<span class="badge upcoming-badge">📋 ${escapeHtml(m.status || '未开始')}</span>`;
 
             container.innerHTML = `
-                <div class="detail-header fade-in ${leagueClass} ${scoreChanged ? 'flash-score' : ''}">
+                <section class="detail-score-card">
                     <div class="detail-meta">
                         <span class="detail-league">${escapeHtml(m.league_name)}</span>
                         <span class="detail-round">${escapeHtml(m.round || '')}</span>
@@ -58,16 +52,15 @@
                         </div>
                         <div class="detail-score">
                             ${isUpcoming ? '<span class="big-vs">vs</span>' : `
-                                <span class="big-score home ${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
+                                <span class="big-score ${m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals ? 'winner' : ''}">${m.home_goals ?? '?'}</span>
                                 <span class="big-sep">-</span>
-                                <span class="big-score away ${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
+                                <span class="big-score ${m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals ? 'winner' : ''}">${m.away_goals ?? '?'}</span>
                             `}
                         </div>
                         <div class="detail-team away">
                             <div class="team-name">${escapeHtml(m.away_team)}</div>
                         </div>
                     </div>
-                    ${isLive ? liveProgress(m.elapsed) : ''}
                     ${m.latest_goal ? `<div class="detail-goal-hint">${escapeHtml(m.latest_goal)}</div>` : ''}
                     <div class="score-splits">
                         ${scoreSplit('半场', m.halftime_home, m.halftime_away)}
@@ -78,31 +71,33 @@
                     <div class="detail-info">
                         <span>🏟️ ${escapeHtml(m.venue || '未知场地')}</span>
                         <span>👨‍⚖️ ${escapeHtml(m.referee || '未知裁判')}</span>
-                        <span>📅 ${m.match_date ? new Date(m.match_date).toLocaleString('zh-CN') : ''}</span>
+                        <span>📅 ${m.match_date ? new Date(m.match_date).toLocaleString('zh-CN') : '待定'}</span>
                     </div>
-                </div>
+                </section>
 
-                ${m.events && m.events.length > 0 ? `
-                <div class="detail-section fade-in">
-                    <h2>比赛事件</h2>
-                    <div class="events-timeline">
-                        ${m.events.map(e => renderEvent(e, m)).join('')}
-                    </div>
-                </div>` : ''}
+                <section class="detail-section">
+                    <h2>事件时间线</h2>
+                    ${m.events && m.events.length > 0 ? `
+                        <div class="events-timeline">
+                            ${m.events.slice().sort((a, b) => Number(a.time || 0) - Number(b.time || 0)).map(e => renderEvent(e, m)).join('')}
+                        </div>
+                    ` : '<div class="empty-state">暂无比赛事件</div>'}
+                </section>
 
-                ${m.stats && Object.keys(m.stats).length > 0 ? `
-                <div class="detail-section fade-in">
+                <section class="detail-section">
                     <h2>统计数据</h2>
-                    <div class="stats-list">
-                        ${renderStats(m)}
-                    </div>
-                </div>` : ''}
+                    ${m.stats && Object.keys(m.stats).length > 0 ? `
+                        <div class="stats-list">
+                            ${renderStats(m)}
+                        </div>
+                    ` : '<div class="empty-state">暂无统计数据</div>'}
+                </section>
             `;
 
             if (isLive) startLiveRefresh();
             else stopLiveRefresh();
         } catch (e) {
-            container.innerHTML = '<div class="error-state">❌ 加载失败: ' + e.message + '</div>';
+            container.innerHTML = '<div class="error-state">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
@@ -114,28 +109,29 @@
             if (key.endsWith('_' + m.home_team_id)) grouped[statName].home = value;
             else if (key.endsWith('_' + m.away_team_id)) grouped[statName].away = value;
         });
-        return Object.entries(grouped).map(([name, vals]) => `
-            <div class="stat-row">
-                <div class="stat-line">
-                    <span class="stat-val home">${vals.home || '—'}</span>
-                    <span class="stat-name">${translateStat(name)}</span>
-                    <span class="stat-val away">${vals.away || '—'}</span>
-                </div>
-                <div class="stat-bars">
-                    ${statBars(vals.home, vals.away, name)}
-                </div>
-            </div>
-        `).join('');
-    }
 
-    function liveProgress(elapsed) {
-        const minute = Math.max(0, Math.min(90, parseInt(elapsed || 0, 10)));
-        return `
-            <div class="live-progress" aria-label="比赛进度">
-                <progress value="${minute}" max="90"></progress>
-                <span>${minute}' / 90'</span>
-            </div>
-        `;
+        const preferred = ['Ball Possession', 'Total Shots', 'Shots on Goal', 'Corner Kicks', 'Fouls', 'Yellow Cards', 'Red Cards'];
+        const names = Object.keys(grouped).sort((a, b) => {
+            const ai = preferred.indexOf(a);
+            const bi = preferred.indexOf(b);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        });
+
+        return names.map(name => {
+            const vals = grouped[name];
+            return `
+                <div class="stat-row">
+                    <div class="stat-line">
+                        <span class="stat-val home">${escapeHtml(vals.home || '—')}</span>
+                        <span class="stat-name">${translateStat(name)}</span>
+                        <span class="stat-val away">${escapeHtml(vals.away || '—')}</span>
+                    </div>
+                    <div class="stat-bars">
+                        ${statBars(name, vals.home, vals.away)}
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     function renderEvent(e, match) {
@@ -167,15 +163,16 @@
         return `<span><em>${label}</em><strong>${home}:${away}</strong></span>`;
     }
 
-    function statBars(home, away, name) {
+    function statBars(name, home, away) {
         const h = parseStatValue(home);
         const a = parseStatValue(away);
         const total = h + a;
         const homeWidth = total > 0 ? Math.max((h / total) * 100, h > 0 ? 6 : 0) : 50;
         const awayWidth = total > 0 ? Math.max((a / total) * 100, a > 0 ? 6 : 0) : 50;
+        const cls = name === 'Ball Possession' ? ' possession' : '';
         return `
-            <progress class="stat-bar home" value="${homeWidth.toFixed(2)}" max="100" aria-label="${escapeHtml(name)} 主队"></progress>
-            <progress class="stat-bar away" value="${awayWidth.toFixed(2)}" max="100" aria-label="${escapeHtml(name)} 客队"></progress>
+            <span class="stat-bar home${cls}"><i style="width: ${homeWidth}%"></i></span>
+            <span class="stat-bar away${cls}"><i style="width: ${awayWidth}%"></i></span>
         `;
     }
 
@@ -195,11 +192,6 @@
             'Red Cards': '红牌'
         };
         return map[name] || name;
-    }
-
-    function leagueClassName(value) {
-        const safe = String(value ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '');
-        return `league-${safe || 'default'}`;
     }
 
     function escapeHtml(value) {

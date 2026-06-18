@@ -9,7 +9,13 @@ import time
 from pathlib import Path
 
 import settings
-from collector import collect_live_matches, collect_schedule, load_seed_data, USE_MOCK
+from collector import (
+    collect_live_matches,
+    collect_schedule,
+    load_seed_data,
+    refresh_prediction_context_daily,
+    USE_MOCK,
+)
 from models import get_db, init_db
 
 shutdown_requested = False
@@ -111,6 +117,14 @@ def main():
                 try:
                     count = collect_schedule()
                     logger.info("schedule collection complete: %s matches", count)
+                    context = refresh_prediction_context_daily()
+                    if not context.get("skipped"):
+                        logger.info(
+                            "prediction context refresh complete: fixtures=%s h2h=%s injuries=%s",
+                            context["fixtures"],
+                            context["h2h"],
+                            context["injuries"],
+                        )
                     next_schedule = time.monotonic() + settings.POLL_TODAY_SECONDS
                 except Exception:
                     logger.exception("schedule collection failed")
