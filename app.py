@@ -12,9 +12,11 @@ Flask 应用，提供本地可视化界面。
 """
 
 import json
+import time
 from datetime import datetime
+from functools import wraps
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, make_response, request
 
 import settings
 from models import get_db, init_db
@@ -39,6 +41,98 @@ app = Flask(__name__)
 
 # 确保数据库就绪
 init_db()
+
+API_CACHE = {}
+API_CACHE_TTL_SECONDS = 20
+MAX_PER_PAGE = 80
+
+
+def _now_label():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _cache_key(prefix):
+    return (prefix, tuple(sorted(request.args.items())))
+
+
+def _json_response(payload, ttl=API_CACHE_TTL_SECONDS, hit=False):
+    response = make_response(jsonify(payload))
+    response.headers["Cache-Control"] = f"public, max-age={ttl}"
+    response.headers["X-Cache"] = "HIT" if hit else "MISS"
+    return response
+
+
+def _cached_json(prefix, ttl=API_CACHE_TTL_SECONDS):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            bypass = request.args.get("cache") == "0"
+            key = _cache_key(prefix)
+            now = time.monotonic()
+            if not bypass:
+                cached = API_CACHE.get(key)
+                if cached and now - cached["ts"] < ttl:
+                    return _json_response(cached["payload"], ttl=ttl, hit=True)
+            payload = func(*args, **kwargs)
+            API_CACHE[key] = {"ts": now, "payload": payload}
+            return _json_response(payload, ttl=ttl)
+        return wrapper
+    return decorator
+
+
+def _pagination_args(default_per_page=24):
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get("per_page", default_per_page))
+    except (TypeError, ValueError):
+        per_page = default_per_page
+    per_page = min(MAX_PER_PAGE, max(1, per_page))
+    return page, per_page
+
+
+def _paginate(items, page, per_page):
+    total = len(items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "has_next": end < total,
+        "has_prev": page > 1,
+    }
+
+
+def _pagination_meta(total, page, per_page):
+    pages = max(1, (total + per_page - 1) // per_page)
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_next": page < pages,
+        "has_prev": page > 1,
+    }
+
+
+def _match_where(league="all", status_filter="all"):
+    where = []
+    params = []
+    if league != "all":
+        where.append("league_id = ?")
+        params.append(int(league))
+    if status_filter == "live":
+        where.append("status IN ('1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT')")
+    elif status_filter == "finished":
+        where.append("status IN ('FT', 'AET', 'PEN')")
+    elif status_filter == "upcoming":
+        where.append("home_goals IS NULL AND away_goals IS NULL")
+        where.append("status IN ('NS', 'TBD', 'PST', 'CANC', 'SUSP')")
+    return (" WHERE " + " AND ".join(where)) if where else "", params
 
 
 def _hydrate_match(row):
@@ -74,32 +168,54 @@ def index():
 
 
 @app.route("/api/matches")
+@_cached_json("matches")
 def api_matches():
     league = request.args.get("league", "all")
     status_filter = request.args.get("status", "all")
+    page, per_page = _pagination_args()
+    offset = (page - 1) * per_page
+    where_sql, params = _match_where(league, status_filter)
 
     with get_db() as conn:
-        if league == "all":
-            rows = conn.execute(
-                "SELECT * FROM football_matches ORDER BY match_date DESC"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM football_matches WHERE league_id = ? ORDER BY match_date DESC",
-                (int(league),),
-            ).fetchall()
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM football_matches{where_sql}",
+            params,
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT * FROM football_matches
+            {where_sql}
+            ORDER BY
+                CASE
+                    WHEN status IN ('1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT') THEN 1
+                    WHEN home_goals IS NULL AND away_goals IS NULL THEN 3
+                    WHEN status IN ('FT', 'AET', 'PEN') THEN 4
+                    ELSE 5
+                END,
+                match_date ASC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, per_page, offset],
+        ).fetchall()
+        count_where, count_params = _match_where(league, "all")
+        count_row = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN status IN ('1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT') THEN 1 ELSE 0 END) AS live,
+                SUM(CASE WHEN home_goals IS NULL AND away_goals IS NULL
+                    AND status IN ('NS', 'TBD', 'PST', 'CANC', 'SUSP') THEN 1 ELSE 0 END) AS upcoming,
+                SUM(CASE WHEN status IN ('FT', 'AET', 'PEN') THEN 1 ELSE 0 END) AS finished
+            FROM football_matches
+            {count_where}
+            """,
+            count_params,
+        ).fetchone()
 
     matches = [_hydrate_match(row) for row in rows]
-    matches.sort(key=lambda m: (m["status_sort"], m.get("match_date", "")))
+    pagination = _pagination_meta(total, page, per_page)
 
-    if status_filter == "live":
-        matches = [m for m in matches if m["status_sort"] <= 2]
-    elif status_filter == "finished":
-        matches = [m for m in matches if m["status_sort"] == 4]
-    elif status_filter == "upcoming":
-        matches = [m for m in matches if _is_upcoming(m)]
-
-    # 预测：对所有需要预测的即将开始比赛，只加载一次已完赛列表并算一次 Elo
+    # 预测：只对当前页需要展示的即将开始比赛计算，避免列表接口全量预测。
     upcoming = [m for m in matches if _is_upcoming(m)]
     if upcoming:
         completed = _load_completed_matches(exclude_fixture_id=-1)
@@ -115,12 +231,15 @@ def api_matches():
             )
             match["corner_prediction"] = corner_prediction["prediction"] if corner_prediction else None
 
-    return jsonify({
+    counts = {key: count_row[key] or 0 for key in ("total", "live", "upcoming", "finished")}
+    return {
         "matches": matches,
-        "total": len(matches),
+        "pagination": pagination,
+        "counts": counts,
+        "total": pagination["total"],
         "is_mock": USE_MOCK,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+        "updated_at": _now_label(),
+    }
 
 
 @app.route("/api/match/<int:fixture_id>")
@@ -155,7 +274,9 @@ def api_predict_corners(fixture_id):
 
 
 @app.route("/api/predictions")
+@_cached_json("predictions", ttl=60)
 def api_predictions():
+    page, per_page = _pagination_args(default_per_page=30)
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -195,12 +316,14 @@ def api_predictions():
             match.get("match_date") or "",
         )
     )
-    return jsonify({
-        "predictions": predictions,
-        "total": len(predictions),
+    paged_predictions, pagination = _paginate(predictions, page, per_page)
+    return {
+        "predictions": paged_predictions,
+        "pagination": pagination,
+        "total": pagination["total"],
         "is_mock": USE_MOCK,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+        "updated_at": _now_label(),
+    }
 
 
 @app.route("/predictions")
@@ -219,13 +342,14 @@ def standings():
 
 
 @app.route("/api/standings")
+@_cached_json("standings", ttl=60)
 def api_standings():
     league = request.args.get("league", "all")
-    return jsonify({
+    return {
         "standings": compute_standings(league),
         "is_mock": USE_MOCK,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+        "updated_at": _now_label(),
+    }
 
 
 @app.route("/api/refresh")
@@ -237,6 +361,7 @@ def api_refresh():
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         msg = f"采集失败: {exc}"
 
+    API_CACHE.clear()
     return jsonify({"message": msg, "is_mock": USE_MOCK})
 
 
@@ -244,6 +369,7 @@ def api_refresh():
 def api_seed():
     """加载种子数据"""
     count = load_seed_data()
+    API_CACHE.clear()
     return jsonify({"message": f"已加载 {count} 场模拟比赛", "count": count})
 
 

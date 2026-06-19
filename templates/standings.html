@@ -64,25 +64,24 @@
 
     async function loadStandings() {
         const list = document.getElementById('standingsList');
-        list.innerHTML = '<div class="loading">加载中...</div>';
+        list.innerHTML = K38.skeleton(3, 'table');
 
         try {
-            const resp = await fetch(`/api/standings?league=${currentLeague}`);
-            const data = await resp.json();
+            const data = await K38.jsonFetch(`/api/standings?league=${currentLeague}`);
 
-            document.getElementById('statusText').textContent = data.is_mock ? '实时' : '在线';
-            document.getElementById('statusDot').className = 'status-dot ' + (data.is_mock ? 'yellow' : 'green');
+            K38.setStatus(data.is_mock);
             document.getElementById('updateTime').textContent = data.updated_at || new Date().toLocaleString('zh-CN');
             updateMetrics(data.standings || []);
 
             if (!data.standings || data.standings.length === 0) {
-                list.innerHTML = '<div class="empty-state">📭 暂无已完赛积分数据</div>';
+                list.innerHTML = K38.empty('暂无已完赛积分数据');
                 return;
             }
 
             list.innerHTML = data.standings.map(renderTable).join('');
+            K38.animateIn('.standings-card', list);
         } catch (e) {
-            list.innerHTML = '<div class="error-state">加载失败: ' + escapeHtml(e.message) + '</div>';
+            list.innerHTML = K38.empty(`加载失败: ${e.message}`, '❌');
         }
     }
 
@@ -102,7 +101,7 @@
             <section class="standings-card" style="--league-color: ${table.league_color}">
                 <div class="standings-header">
                     <div>
-                        <h1>${escapeHtml(table.league_name)}</h1>
+                        <h1>${K38.esc(table.league_name)}</h1>
                         <span>${table.teams.length} 支球队 · 按积分 / 净胜球排序</span>
                     </div>
                 </div>
@@ -126,7 +125,7 @@
                             ${table.teams.map(team => `
                                 <tr>
                                     <td class="rank ${team.rank <= 3 ? 'medal' : ''}">${rankLabel(team.rank)}</td>
-                                    <td class="team-cell"><span class="team-color" style="background: ${table.league_color}"></span>${escapeHtml(team.team)}</td>
+                                    <td class="team-cell"><span class="team-color" style="background: ${table.league_color}"></span>${K38.esc(team.team)}</td>
                                     <td>${team.played}</td>
                                     <td>${team.wins}</td>
                                     <td>${team.draws}</td>
@@ -156,12 +155,6 @@
         if (rank === 2) return '🥈';
         if (rank === 3) return '🥉';
         return rank;
-    }
-
-    function escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"']/g, s => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[s]));
     }
 
     loadStandings();

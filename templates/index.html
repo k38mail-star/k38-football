@@ -59,14 +59,16 @@
 <script>
     let currentLeague = 'all';
     let currentStatus = 'all';
+    let currentPage = 1;
+    const perPage = 24;
 
-    // Filter handlers
     document.getElementById('leagueFilters').addEventListener('click', e => {
         const btn = e.target.closest('.pill');
         if (!btn) return;
         document.querySelectorAll('#leagueFilters .pill').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentLeague = btn.dataset.league;
+        currentPage = 1;
         loadMatches();
     });
 
@@ -76,69 +78,64 @@
         document.querySelectorAll('#statusFilters .pill').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentStatus = btn.dataset.status;
+        currentPage = 1;
         loadMatches();
     });
 
+    window.loadPage = page => {
+        currentPage = page;
+        loadMatches();
+    };
+
     async function loadMatches() {
         const container = document.getElementById('matchesContainer');
-        container.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><span>加载比赛数据...</span></div>';
+        container.innerHTML = K38.skeleton(5, 'match');
 
         try {
-            const resp = await fetch(`/api/matches?league=${currentLeague}&status=${currentStatus}`);
-            const data = await resp.json();
-
-            // Update status
-            const isMock = data.is_mock;
-            document.getElementById('statusDot').className = 'status-indicator ' + (isMock ? 'mock' : 'online');
-            document.getElementById('statusText').textContent = isMock ? '实时' : '在线';
-
-            // Update counts
-            document.getElementById('heroTotal').textContent = data.total || 0;
-
+            const params = new URLSearchParams({
+                league: currentLeague,
+                status: currentStatus,
+                page: currentPage,
+                per_page: perPage
+            });
+            const data = await K38.jsonFetch(`/api/matches?${params}`);
             const matches = data.matches || [];
-            const liveCount = matches.filter(m => m.status_sort <= 2).length;
-            const upcomingCount = matches.filter(m => m.status_sort === 3).length;
-            const finishedCount = matches.filter(m => m.status_sort === 4).length;
+            const counts = data.counts || {};
 
-            document.getElementById('heroLive').textContent = liveCount;
-            document.getElementById('heroUpcoming').textContent = upcomingCount;
-            document.getElementById('countAll').textContent = data.total || 0;
-            document.getElementById('countLive').textContent = liveCount;
-            document.getElementById('countUpcoming').textContent = upcomingCount;
-            document.getElementById('countFinished').textContent = finishedCount;
+            K38.setStatus(data.is_mock);
+            document.getElementById('heroTotal').textContent = counts.total || data.total || 0;
+            document.getElementById('heroLive').textContent = counts.live || 0;
+            document.getElementById('heroUpcoming').textContent = counts.upcoming || 0;
+            document.getElementById('countAll').textContent = counts.total || 0;
+            document.getElementById('countLive').textContent = counts.live || 0;
+            document.getElementById('countUpcoming').textContent = counts.upcoming || 0;
+            document.getElementById('countFinished').textContent = counts.finished || 0;
 
             if (matches.length === 0) {
-                container.innerHTML = '<div class="empty-state"><span class="empty-icon">📭</span><span>暂无比赛数据</span></div>';
+                container.innerHTML = K38.empty('暂无比赛数据');
                 return;
             }
 
-            // Group by date
             const groups = {};
             matches.forEach(m => {
-                const key = getDateKey(m.match_date);
+                const key = K38.dateKey(m.match_date);
                 if (!groups[key]) groups[key] = [];
                 groups[key].push(m);
             });
 
-            const sorted = Object.entries(groups).sort(([a], [b]) => dateOrder(a) - dateOrder(b));
+            const sorted = Object.entries(groups).sort(([a], [b]) => K38.dateOrder(a) - K38.dateOrder(b));
 
             container.innerHTML = sorted.map(([key, items]) => `
                 <div class="date-group">
-                    <div class="date-header">${dateLabel(key)} <span class="date-count">${items.length} 场</span></div>
+                    <div class="date-header">${K38.dateLabel(key)} <span class="date-count">${items.length} 场</span></div>
                     <div class="match-cards">${items.map(m => renderMatch(m)).join('')}</div>
                 </div>
-            `).join('');
+            `).join('') + K38.pagination(data.pagination, 'loadPage');
 
-            // Animate in
-            requestAnimationFrame(() => {
-                document.querySelectorAll('.match-card').forEach((el, i) => {
-                    el.style.setProperty('--i', i);
-                    el.classList.add('animate-in');
-                });
-            });
+            K38.animateIn('.match-card', container);
 
         } catch (e) {
-            container.innerHTML = `<div class="empty-state"><span class="empty-icon">❌</span><span>加载失败: ${e.message}</span></div>`;
+            container.innerHTML = K38.empty(`加载失败: ${e.message}`, '❌');
         }
     }
 
@@ -151,7 +148,7 @@
         if (isLive) badge = `<span class="match-badge live"><span class="live-dot"></span> ${m.elapsed || 0}'</span>`;
         else if (isFinished) badge = `<span class="match-badge finished">FT</span>`;
         else {
-            const t = formatTime(m.match_date);
+            const t = K38.formatTime(m.match_date);
             badge = `<span class="match-badge upcoming">${t}</span>`;
         }
 
@@ -160,7 +157,7 @@
             scoreDisplay = `
                 <div class="score-upcoming">
                     <span>VS</span>
-                    <small>${formatTime(m.match_date)}</small>
+                    <small>${K38.formatTime(m.match_date)}</small>
                 </div>`;
         } else {
             const hw = (m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals) ? 'winner' : '';
@@ -174,7 +171,7 @@
         }
 
         const events = (m.events || []).filter(e => e.type === 'Goal').slice(-2);
-        const eventStr = events.map(e => `⚽ ${e.time}' ${e.player || ''}`).join(' · ');
+        const eventStr = events.map(e => `⚽ ${K38.esc(e.time)}' ${K38.esc(e.player || '')}`).join(' · ');
         const homeTeam = renderTeam(m, 'home');
         const awayTeam = renderTeam(m, 'away');
         const predictionHtml = isUpcoming ? renderPredictionSummary(m) : '';
@@ -182,7 +179,7 @@
         return `
             <a href="/match/${m.fixture_id}" class="match-card ${isLive ? 'card-live' : isFinished ? 'card-finished' : 'card-upcoming'}" style="--accent: ${m.league_color}">
                 <div class="card-top">
-                    <span class="card-league"><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${esc(m.league_name)}${m.round ? ' · ' + esc(m.round) : ''}</span>
+                    <span class="card-league"><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${K38.esc(m.league_name)}${m.round ? ' · ' + K38.esc(m.round) : ''}</span>
                     ${badge}
                 </div>
                 <div class="card-main">
@@ -192,7 +189,7 @@
                 </div>
                 <div class="card-bottom">
                     <span class="card-meta">${m.halftime_home !== null ? 'HT ' + m.halftime_home + ':' + m.halftime_away : ''}${eventStr ? ' · ' + eventStr : ''}</span>
-                    <span class="card-venue">${esc(m.venue || '')}</span>
+                    <span class="card-venue">${K38.esc(m.venue || '')}</span>
                 </div>
                 ${predictionHtml}
             </a>
@@ -220,11 +217,11 @@
         const corners = renderCornerPrediction(m.corner_prediction);
         return `
             <div class="prediction-box">
-                <div class="prediction-main">预测 ${esc(winnerName)}${winnerSide === 'draw' ? '' : ' 获胜'} <strong>(${p.confidence}%)</strong></div>
-                ${statFactor ? `<div class="prediction-stat">📊 ${esc(statFactor.text)}</div>` : ''}
+                <div class="prediction-main">预测 ${K38.esc(winnerName)}${winnerSide === 'draw' ? '' : ' 获胜'} <strong>(${p.confidence}%)</strong></div>
+                ${statFactor ? `<div class="prediction-stat">📊 ${K38.esc(statFactor.text)}</div>` : ''}
                 ${context ? `<div class="prediction-stat">${context}</div>` : ''}
                 ${corners}
-                <div class="prediction-detail">${factorIcon(factor)} ${esc(mood)}</div>
+                <div class="prediction-detail">${factorIcon(factor)} ${K38.esc(mood)}</div>
             </div>
         `;
     }
@@ -242,15 +239,11 @@
     function predictionContextLine(m, p) {
         const h = p.h2h_summary || {};
         const inj = p.injury_summary || {};
-        const home = shortTeamName(m, 'home');
-        const away = shortTeamName(m, 'away');
+        const home = K38.shortTeamName(m, 'home');
+        const away = K38.shortTeamName(m, 'away');
         const h2h = h.total ? `H2H ${home} ${h.home_wins}-${h.away_wins} ${away}` : 'H2H 暂无';
         const injuries = `伤病 ${home} ${inj.home_count || 0}人/${away} ${inj.away_count || 0}人`;
-        return `${h2h} · ${injuries}`;
-    }
-
-    function shortTeamName(m, side) {
-        return m[`${side}_team_en`] || m[`${side}_team`] || '';
+        return K38.esc(`${h2h} · ${injuries}`);
     }
 
     function displayTeamName(m, side) {
@@ -271,58 +264,21 @@
         const cnName = m[`${side}_team_cn`] || '';
         const enName = m[`${side}_team_en`] || '';
         const flag = m[`${side}_flag`] || '';
-        const rawIsChinese = hasChinese(rawName);
+        const rawIsChinese = K38.hasChinese(rawName);
         const showFlagLayout = Boolean(flag);
         const primary = showFlagLayout ? (enName || rawName) : (rawIsChinese ? rawName : (enName || rawName));
         const secondary = showFlagLayout ? (cnName || (rawIsChinese ? rawName : '')) : (rawIsChinese ? enName : cnName);
-        const flagHtml = showFlagLayout ? `<span class="team-flag">${esc(flag)}</span>` : '';
+        const flagHtml = showFlagLayout ? `<span class="team-flag">${K38.esc(flag)}</span>` : '';
         const secondaryHtml = secondary && secondary !== primary
-            ? `<div class="team-secondary">${esc(secondary)}</div>`
+            ? `<div class="team-secondary">${K38.esc(secondary)}</div>`
             : '';
 
         return `
             <div class="card-team ${side}">
-                <div class="team-primary">${flagHtml}<span>${esc(primary)}</span></div>
+                <div class="team-primary">${flagHtml}<span>${K38.esc(primary)}</span></div>
                 ${secondaryHtml}
             </div>
         `;
-    }
-
-    function hasChinese(v) {
-        return /[\u4e00-\u9fff]/.test(String(v || ''));
-    }
-
-    function getDateKey(v) {
-        if (!v) return 'unknown';
-        const d = new Date(v);
-        return isNaN(d) ? 'unknown' : d.toISOString().slice(0, 10);
-    }
-
-    function dateLabel(key) {
-        if (key === 'unknown') return '待定';
-        const today = new Date().toISOString().slice(0, 10);
-        if (key === today) return '📅 今天';
-        const y = new Date(); y.setDate(y.getDate() - 1);
-        if (key === y.toISOString().slice(0, 10)) return '📅 昨天';
-        const t = new Date(); t.setDate(t.getDate() + 1);
-        if (key === t.toISOString().slice(0, 10)) return '📅 明天';
-        const d = new Date(key + 'T00:00:00');
-        return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
-    }
-
-    function dateOrder(key) {
-        if (key === 'unknown') return 999;
-        return new Date(key + 'T00:00:00').getTime();
-    }
-
-    function formatTime(v) {
-        if (!v) return '待定';
-        const d = new Date(v);
-        return isNaN(d) ? '待定' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    }
-
-    function esc(v) {
-        return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
     }
 
     loadMatches();

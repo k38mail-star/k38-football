@@ -91,6 +91,16 @@ def init_db():
                 refreshed_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS football_api_cache (
+                cache_key TEXT PRIMARY KEY,
+                endpoint TEXT NOT NULL,
+                params TEXT NOT NULL DEFAULT '{}',
+                response TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS prediction_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL,
@@ -137,6 +147,15 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_prediction_log_algorithm_created
                 ON prediction_log(algorithm, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_football_matches_league_date
+                ON football_matches(league_id, match_date);
+
+            CREATE INDEX IF NOT EXISTS idx_football_matches_status_date
+                ON football_matches(status, match_date);
+
+            CREATE INDEX IF NOT EXISTS idx_football_api_cache_expires
+                ON football_api_cache(expires_at);
         """)
         columns = {
             row["name"]

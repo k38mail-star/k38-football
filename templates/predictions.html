@@ -27,27 +27,35 @@
 
 {% block scripts %}
 <script>
+    let currentPage = 1;
+    const perPage = 30;
+
+    window.loadPredictionPage = page => {
+        currentPage = page;
+        loadPredictions();
+    };
+
     async function loadPredictions() {
         const list = document.getElementById('predictionsList');
-        list.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><span>加载预测数据...</span></div>';
+        list.innerHTML = K38.skeleton(4, 'prediction');
 
         try {
-            const resp = await fetch('/api/predictions');
-            const data = await resp.json();
+            const params = new URLSearchParams({ page: currentPage, per_page: perPage });
+            const data = await K38.jsonFetch(`/api/predictions?${params}`);
             const matches = data.predictions || [];
 
-            document.getElementById('statusDot').className = 'status-indicator ' + (data.is_mock ? 'mock' : 'online');
-            document.getElementById('statusText').textContent = data.is_mock ? '实时' : '在线';
+            K38.setStatus(data.is_mock);
             document.getElementById('predictionTotal').textContent = data.total || 0;
 
             if (matches.length === 0) {
-                list.innerHTML = '<div class="empty-state"><span class="empty-icon">📭</span><span>暂无即将开始的比赛</span></div>';
+                list.innerHTML = K38.empty('暂无即将开始的比赛');
                 return;
             }
 
-            list.innerHTML = matches.map(renderPredictionCard).join('');
+            list.innerHTML = matches.map(renderPredictionCard).join('') + K38.pagination(data.pagination, 'loadPredictionPage');
+            K38.animateIn('.prediction-card', list);
         } catch (e) {
-            list.innerHTML = `<div class="empty-state"><span class="empty-icon">❌</span><span>加载失败: ${esc(e.message)}</span></div>`;
+            list.innerHTML = K38.empty(`加载失败: ${e.message}`, '❌');
         }
     }
 
@@ -63,8 +71,8 @@
         return `
             <a href="/match/${m.fixture_id}" class="prediction-card" style="--accent: ${m.league_color}">
                 <div class="prediction-card-top">
-                    <span><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${esc(m.league_name)}${m.round ? ' · ' + esc(m.round) : ''}</span>
-                    <time>${esc(time)}</time>
+                    <span><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${K38.esc(m.league_name)}${m.round ? ' · ' + K38.esc(m.round) : ''}</span>
+                    <time>${K38.esc(time)}</time>
                 </div>
                 <div class="prediction-teams">
                     <strong>${home}</strong>
@@ -86,7 +94,7 @@
 
         return `
             <div class="prediction-card-result">
-                <span>预测 ${esc(winner)}</span>
+                <span>预测 ${K38.esc(winner)}</span>
                 <strong>${p.confidence}%</strong>
             </div>
             <div class="probability-bars">
@@ -98,11 +106,11 @@
                     </div>
                 `).join('')}
             </div>
-            <div class="prediction-score">预测比分 <strong>${esc(p.predicted_score || '待定')}</strong></div>
+            <div class="prediction-score">预测比分 <strong>${K38.esc(p.predicted_score || '待定')}</strong></div>
             ${renderPredictionContext(m, p)}
-            <div class="prediction-card-detail">${esc(p.prediction_detail || '')}</div>
+            <div class="prediction-card-detail">${K38.esc(p.prediction_detail || '')}</div>
             <div class="prediction-factors">
-                ${(p.factors || []).slice(0, 4).map(f => `<span class="${esc(f.type)}">${esc(f.text)}</span>`).join('')}
+                ${(p.factors || []).slice(0, 4).map(f => `<span class="${K38.esc(f.type)}">${K38.esc(f.text)}</span>`).join('')}
             </div>
         `;
     }
@@ -112,11 +120,11 @@
         const inj = p.injury_summary || {};
         const elo = p.elo_summary || {};
         const h2hText = h.total
-            ? `${esc(teamShortName(m, 'home'))} ${h.home_wins}-${h.away_wins} ${esc(teamShortName(m, 'away'))}，平 ${h.draws}`
+            ? `${K38.esc(teamShortName(m, 'home'))} ${h.home_wins}-${h.away_wins} ${K38.esc(teamShortName(m, 'away'))}，平 ${h.draws}`
             : '暂无 API 历史交锋';
-        const injuryText = `${esc(teamShortName(m, 'home'))} ${inj.home_count || 0}人 -${inj.home_penalty || 0}% · ${esc(teamShortName(m, 'away'))} ${inj.away_count || 0}人 -${inj.away_penalty || 0}%`;
+        const injuryText = `${K38.esc(teamShortName(m, 'home'))} ${inj.home_count || 0}人 -${inj.home_penalty || 0}% · ${K38.esc(teamShortName(m, 'away'))} ${inj.away_count || 0}人 -${inj.away_penalty || 0}%`;
         const eloText = (elo.home_elo && elo.away_elo)
-            ? `${esc(teamShortName(m, 'home'))} ${elo.home_elo} · ${esc(teamShortName(m, 'away'))} ${elo.away_elo}`
+            ? `${K38.esc(teamShortName(m, 'home'))} ${elo.home_elo} · ${K38.esc(teamShortName(m, 'away'))} ${elo.away_elo}`
             : 'Elo 样本不足';
         return `
             <div class="prediction-context">
@@ -130,7 +138,7 @@
     function teamLabel(m, side) {
         const flag = m[`${side}_flag`] || '';
         const name = m[`${side}_team_en`] || m[`${side}_team`] || '';
-        return `${flag ? flag + ' ' : ''}${esc(name)}`;
+        return K38.esc(`${flag ? flag + ' ' : ''}${name}`);
     }
 
     function teamText(m, side) {
@@ -141,10 +149,6 @@
 
     function teamShortName(m, side) {
         return m[`${side}_team_en`] || m[`${side}_team`] || '';
-    }
-
-    function esc(v) {
-        return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
     }
 
     loadPredictions();

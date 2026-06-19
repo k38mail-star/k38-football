@@ -15,40 +15,40 @@
 
     async function loadMatch() {
         const container = document.getElementById('matchDetail');
+        if (!container.dataset.loaded) container.innerHTML = K38.skeleton(3, 'detail');
 
         try {
-            const resp = await fetch(`/api/match/${fixtureId}`);
-            const m = await resp.json();
+            const m = await K38.jsonFetch(`/api/match/${fixtureId}`);
 
             if (m.error) {
-                container.innerHTML = '<div class="error-state">比赛未找到</div>';
+                container.innerHTML = K38.empty('比赛未找到', '❌');
                 stopLiveRefresh();
                 return;
             }
+            container.dataset.loaded = '1';
 
             const isLive = m.status_sort <= 2;
             const isFinished = m.status_sort === 4;
             const isUpcoming = m.status_sort === 3 && m.home_goals === null && m.away_goals === null;
 
-            document.getElementById('statusText').textContent = isLive ? '自动刷新中' : (isFinished ? '已结束' : '未开始');
-            document.getElementById('statusDot').className = 'status-dot ' + (isLive ? 'green' : 'yellow');
+            K38.setStatus(false, isLive ? '自动刷新中' : (isFinished ? '已结束' : '未开始'), isLive ? 'online' : 'mock');
 
             const badge = isLive
                 ? `<span class="badge live-badge">🟢 ${m.elapsed || 0}'</span>`
                 : isFinished
                     ? '<span class="badge finished-badge">🏁 已结束</span>'
-                    : `<span class="badge upcoming-badge">📋 ${escapeHtml(m.status || '未开始')}</span>`;
+                    : `<span class="badge upcoming-badge">📋 ${K38.esc(m.status || '未开始')}</span>`;
 
             container.innerHTML = `
                 <section class="detail-score-card">
                     <div class="detail-meta">
-                        <span class="detail-league">${escapeHtml(m.league_name)}</span>
-                        <span class="detail-round">${escapeHtml(m.round || '')}</span>
+                        <span class="detail-league">${K38.esc(m.league_name)}</span>
+                        <span class="detail-round">${K38.esc(m.round || '')}</span>
                         ${badge}
                     </div>
                     <div class="detail-scoreboard">
                         <div class="detail-team home">
-                            <div class="team-name">${escapeHtml(m.home_team)}</div>
+                            <div class="team-name">${K38.teamName(m, 'home')}</div>
                         </div>
                         <div class="detail-score">
                             ${isUpcoming ? '<span class="big-vs">vs</span>' : `
@@ -58,10 +58,10 @@
                             `}
                         </div>
                         <div class="detail-team away">
-                            <div class="team-name">${escapeHtml(m.away_team)}</div>
+                            <div class="team-name">${K38.teamName(m, 'away')}</div>
                         </div>
                     </div>
-                    ${m.latest_goal ? `<div class="detail-goal-hint">${escapeHtml(m.latest_goal)}</div>` : ''}
+                    ${m.latest_goal ? `<div class="detail-goal-hint">${K38.esc(m.latest_goal)}</div>` : ''}
                     <div class="score-splits">
                         ${scoreSplit('半场', m.halftime_home, m.halftime_away)}
                         ${scoreSplit('全场', m.fulltime_home, m.fulltime_away)}
@@ -69,8 +69,8 @@
                         ${scoreSplit('点球', m.penalty_home, m.penalty_away)}
                     </div>
                     <div class="detail-info">
-                        <span>🏟️ ${escapeHtml(m.venue || '未知场地')}</span>
-                        <span>👨‍⚖️ ${escapeHtml(m.referee || '未知裁判')}</span>
+                        <span>🏟️ ${K38.esc(m.venue || '未知场地')}</span>
+                        <span>👨‍⚖️ ${K38.esc(m.referee || '未知裁判')}</span>
                         <span>📅 ${m.match_date ? new Date(m.match_date).toLocaleString('zh-CN') : '待定'}</span>
                     </div>
                 </section>
@@ -81,7 +81,7 @@
                         <div class="events-timeline">
                             ${m.events.slice().sort((a, b) => Number(a.time || 0) - Number(b.time || 0)).map(e => renderEvent(e, m)).join('')}
                         </div>
-                    ` : '<div class="empty-state">暂无比赛事件</div>'}
+                    ` : K38.empty('暂无比赛事件')}
                 </section>
 
                 <section class="detail-section">
@@ -90,14 +90,15 @@
                         <div class="stats-list">
                             ${renderStats(m)}
                         </div>
-                    ` : '<div class="empty-state">暂无统计数据</div>'}
+                    ` : K38.empty('暂无统计数据')}
                 </section>
             `;
+            K38.animateIn('.detail-score-card, .detail-section', container);
 
             if (isLive) startLiveRefresh();
             else stopLiveRefresh();
         } catch (e) {
-            container.innerHTML = '<div class="error-state">加载失败: ' + escapeHtml(e.message) + '</div>';
+            container.innerHTML = K38.empty(`加载失败: ${e.message}`, '❌');
         }
     }
 
@@ -122,9 +123,9 @@
             return `
                 <div class="stat-row">
                     <div class="stat-line">
-                        <span class="stat-val home">${escapeHtml(vals.home || '—')}</span>
+                        <span class="stat-val home">${K38.esc(vals.home || '—')}</span>
                         <span class="stat-name">${translateStat(name)}</span>
-                        <span class="stat-val away">${escapeHtml(vals.away || '—')}</span>
+                        <span class="stat-val away">${K38.esc(vals.away || '—')}</span>
                     </div>
                     <div class="stat-bars">
                         ${statBars(name, vals.home, vals.away)}
@@ -141,8 +142,8 @@
                 <span class="event-time">${e.time ?? ''}'</span>
                 <span class="event-icon">${eventIcon(e)}</span>
                 <span class="event-main">
-                    <strong>${escapeHtml(e.player || e.team || '')}</strong>
-                    <small>${escapeHtml(e.team || '')}${e.detail ? ' · ' + escapeHtml(e.detail) : ''}</small>
+                    <strong>${K38.esc(e.player || e.team || '')}</strong>
+                    <small>${K38.esc(e.team || '')}${e.detail ? ' · ' + K38.esc(e.detail) : ''}</small>
                 </span>
             </div>
         `;
@@ -192,12 +193,6 @@
             'Red Cards': '红牌'
         };
         return map[name] || name;
-    }
-
-    function escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"']/g, s => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[s]));
     }
 
     function startLiveRefresh() {
