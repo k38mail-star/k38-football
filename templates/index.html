@@ -1,345 +1,756 @@
 {% extends "base.html" %}
 
+{% block head %}
+<style>
+    :root {
+        --k38-bg: #0b0e14;
+        --k38-panel: #0f1420;
+        --k38-elevated: #1a2030;
+        --k38-accent: #42affa;
+        --k38-text: #eef4ff;
+        --k38-muted: #8b98ad;
+        --k38-border: rgba(255, 255, 255, 0.08);
+        --k38-good: #36d399;
+        --k38-warn: #fbbf24;
+        --k38-dim: #667085;
+    }
+
+    body {
+        background: var(--k38-bg);
+        color: var(--k38-text);
+    }
+
+    .v3-shell {
+        width: min(1480px, calc(100% - 32px));
+        margin: 24px auto 56px;
+        display: grid;
+        gap: 18px;
+    }
+
+    .dashboard-panel {
+        background: var(--k38-panel);
+        border: 1px solid var(--k38-border);
+        border-radius: 8px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+    }
+
+    .overview-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 16px;
+        padding: 18px;
+    }
+
+    .overview-main {
+        display: grid;
+        gap: 16px;
+        min-width: 0;
+    }
+
+    .overview-top {
+        display: grid;
+        grid-template-columns: 220px repeat(4, minmax(130px, 1fr));
+        gap: 12px;
+        align-items: stretch;
+    }
+
+    .date-card,
+    .metric-card,
+    .side-card,
+    .hot-strip {
+        background: var(--k38-elevated);
+        border: 1px solid var(--k38-border);
+        border-radius: 8px;
+    }
+
+    .date-card {
+        display: grid;
+        gap: 8px;
+        padding: 13px;
+    }
+
+    .date-card span,
+    .metric-card span,
+    .side-card h2,
+    .hot-head span {
+        color: var(--k38-muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+
+    .date-card input {
+        width: 100%;
+        min-height: 38px;
+        color: var(--k38-text);
+        background: #0b0e14;
+        border: 1px solid var(--k38-border);
+        border-radius: 6px;
+        padding: 0 10px;
+        color-scheme: dark;
+    }
+
+    .metric-card {
+        padding: 13px 14px;
+        display: grid;
+        align-content: space-between;
+        min-height: 76px;
+    }
+
+    .metric-card strong {
+        font-size: 28px;
+        line-height: 1;
+        color: var(--k38-accent);
+    }
+
+    .hot-strip {
+        padding: 12px;
+        min-width: 0;
+    }
+
+    .hot-head,
+    .side-head,
+    .table-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+
+    .hot-head small,
+    .side-head small,
+    .table-head span {
+        color: var(--k38-muted);
+        font-size: 12px;
+    }
+
+    .hot-list {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(170px, 1fr));
+        gap: 10px;
+        overflow-x: auto;
+    }
+
+    .hot-match {
+        min-width: 170px;
+        padding: 10px;
+        color: inherit;
+        text-decoration: none;
+        background: #111827;
+        border: 1px solid var(--k38-border);
+        border-radius: 8px;
+        display: grid;
+        gap: 7px;
+    }
+
+    .hot-match:hover,
+    .predict-link:hover {
+        border-color: rgba(66, 175, 250, 0.55);
+    }
+
+    .hot-match strong,
+    .prediction-item strong {
+        font-size: 13px;
+        line-height: 1.35;
+    }
+
+    .hot-match span,
+    .prediction-item span {
+        color: var(--k38-muted);
+        font-size: 12px;
+    }
+
+    .side-card {
+        padding: 14px;
+        min-width: 0;
+    }
+
+    .prediction-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .prediction-item {
+        color: inherit;
+        text-decoration: none;
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        background: #111827;
+        border: 1px solid var(--k38-border);
+        border-radius: 8px;
+    }
+
+    .filters-panel {
+        padding: 14px 16px;
+        display: grid;
+        gap: 12px;
+    }
+
+    .filter-row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .filter-name {
+        width: 54px;
+        padding-top: 9px;
+        color: var(--k38-muted);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .segmented {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .segment {
+        min-height: 34px;
+        padding: 0 12px;
+        color: #c8d3e4;
+        background: #111827;
+        border: 1px solid var(--k38-border);
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 700;
+    }
+
+    .segment.active {
+        color: #04111d;
+        background: var(--k38-accent);
+        border-color: var(--k38-accent);
+    }
+
+    .status-row.is-hidden {
+        display: none;
+    }
+
+    .table-panel {
+        padding: 16px;
+    }
+
+    .table-head h1 {
+        margin: 0;
+        font-size: 18px;
+    }
+
+    .match-table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--k38-border);
+        border-radius: 8px;
+    }
+
+    .match-table {
+        width: 100%;
+        min-width: 1120px;
+        border-collapse: collapse;
+        background: #0f1420;
+    }
+
+    .match-table th,
+    .match-table td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--k38-border);
+        text-align: left;
+        vertical-align: middle;
+        font-size: 13px;
+    }
+
+    .match-table th {
+        color: var(--k38-muted);
+        background: #111827;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .match-table tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        min-width: 68px;
+        justify-content: center;
+        padding: 5px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+        background: rgba(139, 152, 173, 0.14);
+        color: #b8c3d4;
+    }
+
+    .status-pill.live {
+        background: rgba(54, 211, 153, 0.12);
+        color: var(--k38-good);
+    }
+
+    .status-pill.upcoming {
+        background: rgba(251, 191, 36, 0.12);
+        color: var(--k38-warn);
+    }
+
+    .status-pill.finished {
+        color: var(--k38-dim);
+    }
+
+    .team-cell {
+        display: grid;
+        gap: 3px;
+    }
+
+    .team-cell strong {
+        font-size: 14px;
+    }
+
+    .team-cell span {
+        color: var(--k38-muted);
+        font-size: 12px;
+    }
+
+    .score-cell {
+        color: var(--k38-accent);
+        font-size: 17px;
+        font-weight: 900;
+        white-space: nowrap;
+    }
+
+    .odds-cell,
+    .possession-cell {
+        color: #d6deea;
+        white-space: nowrap;
+    }
+
+    .predict-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        padding: 0 10px;
+        color: var(--k38-accent);
+        text-decoration: none;
+        border: 1px solid rgba(66, 175, 250, 0.35);
+        border-radius: 6px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .table-state {
+        color: var(--k38-muted);
+        text-align: center !important;
+        padding: 28px !important;
+    }
+
+    .pagination {
+        margin-top: 14px;
+    }
+
+    @media (max-width: 1100px) {
+        .overview-panel {
+            grid-template-columns: 1fr;
+        }
+
+        .overview-top {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .date-card {
+            grid-column: 1 / -1;
+        }
+
+        .hot-list {
+            grid-template-columns: repeat(2, minmax(170px, 1fr));
+        }
+    }
+
+    @media (max-width: 680px) {
+        .v3-shell {
+            width: min(100% - 20px, 1480px);
+            margin-top: 14px;
+        }
+
+        .overview-panel,
+        .table-panel,
+        .filters-panel {
+            padding: 12px;
+        }
+
+        .overview-top,
+        .hot-list {
+            grid-template-columns: 1fr;
+        }
+
+        .filter-row {
+            display: grid;
+            gap: 8px;
+        }
+
+        .filter-name {
+            width: auto;
+            padding-top: 0;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<!-- Hero Statistics -->
-<section class="hero">
-    <div class="hero-stats">
-        <div class="hero-stat">
-            <span class="hero-stat-num" id="heroLive" style="color: var(--accent-live);">—</span>
-            <span class="hero-stat-label">🔴 正在直播</span>
-        </div>
-        <div class="hero-stat">
-            <span class="hero-stat-num" id="heroUpcoming">—</span>
-            <span class="hero-stat-label">📅 即将开始</span>
-        </div>
-        <div class="hero-stat">
-            <span class="hero-stat-num" id="heroFinished">—</span>
-            <span class="hero-stat-label">🏁 今日已结束</span>
-        </div>
-    </div>
-</section>
+<main class="v3-shell" id="k38App">
+    <section class="dashboard-panel overview-panel" aria-label="足球看板">
+        <div class="overview-main">
+            <div class="overview-top">
+                <label class="date-card">
+                    <span>日期选择</span>
+                    <input type="date" id="dateSelect">
+                </label>
+                <article class="metric-card">
+                    <span>全部比赛</span>
+                    <strong id="metricTotal">0</strong>
+                </article>
+                <article class="metric-card">
+                    <span>进行中</span>
+                    <strong id="metricLive">0</strong>
+                </article>
+                <article class="metric-card">
+                    <span>未开始</span>
+                    <strong id="metricUpcoming">0</strong>
+                </article>
+                <article class="metric-card">
+                    <span>已结束</span>
+                    <strong id="metricFinished">0</strong>
+                </article>
+            </div>
 
-<!-- Filters -->
-<section class="filters">
-    <!-- League Filter -->
-    <div class="filter-section">
-        <div class="filter-label">🏆 联赛筛选</div>
-        <div class="filter-pills" id="leagueFilters">
-            <button class="pill active" data-league="all">全部联赛</button>
-            {% for lid, color in leagues.items() %}
-            <button class="pill" data-league="{{ lid }}" style="--league-color: {{ color }}">
-                {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
-            </button>
-            {% endfor %}
+            <section class="hot-strip" aria-label="热门比赛">
+                <div class="hot-head">
+                    <span>热门比赛</span>
+                    <small id="hotMatchCount">0 场</small>
+                </div>
+                <div class="hot-list" id="hotMatches"></div>
+            </section>
         </div>
-    </div>
 
-    <!-- Status Filter -->
-    <div class="filter-section">
-        <div class="filter-label">📊 状态筛选</div>
-        <div class="filter-pills" id="statusFilters">
-            <button class="pill active" data-status="all">
-                全部 <span class="pill-count" id="countAll">0</span>
-            </button>
-            <button class="pill" data-status="live">
-                🔴 直播 <span class="pill-count" id="countLive">0</span>
-            </button>
-            <button class="pill" data-status="upcoming">
-                📋 未开始 <span class="pill-count" id="countUpcoming">0</span>
-            </button>
-            <button class="pill" data-status="finished">
-                🏁 已结束 <span class="pill-count" id="countFinished">0</span>
-            </button>
+        <aside class="side-card" aria-label="今日预测">
+            <div class="side-head">
+                <h2>今日预测</h2>
+                <small id="predictionCount">0 条</small>
+            </div>
+            <div class="prediction-list" id="sidePredictions"></div>
+        </aside>
+    </section>
+
+    <section class="dashboard-panel filters-panel" aria-label="赛事筛选">
+        <div class="filter-row">
+            <span class="filter-name">联赛</span>
+            <div class="segmented" id="leagueFilters">
+                <button type="button" class="segment active" data-league="all">全部联赛</button>
+                {% for lid, color in leagues.items() %}
+                <button type="button" class="segment" data-league="{{ lid }}" style="--league-color: {{ color }}">
+                    {{ league_names.get(lid, lid) }}
+                </button>
+                {% endfor %}
+            </div>
         </div>
-    </div>
-</section>
+        <div class="filter-row status-row is-hidden" id="statusFilterRow">
+            <span class="filter-name">状态</span>
+            <div class="segmented" id="statusFilters">
+                <button type="button" class="segment active" data-status="all">全部</button>
+                <button type="button" class="segment" data-status="live">进行中</button>
+                <button type="button" class="segment" data-status="upcoming">未开始</button>
+                <button type="button" class="segment" data-status="finished">已结束</button>
+            </div>
+        </div>
+    </section>
 
-<!-- Match List Container -->
-<section class="matches" id="matchesContainer">
-    <div class="loading-screen">
-        <div class="loading-spinner"></div>
-        <span>正在加载比赛数据...</span>
-    </div>
-</section>
+    <section class="dashboard-panel table-panel" aria-label="比赛列表">
+        <div class="table-head">
+            <h1>比赛列表</h1>
+            <span id="resultSummary">加载中</span>
+        </div>
+        <div class="match-table-wrap">
+            <table class="match-table">
+                <thead>
+                    <tr>
+                        <th>状态</th>
+                        <th>主队中英</th>
+                        <th>比分</th>
+                        <th>客队中英</th>
+                        <th>初始赔率</th>
+                        <th>实时赔率</th>
+                        <th>控球</th>
+                        <th>预测可点击</th>
+                    </tr>
+                </thead>
+                <tbody id="matchRows">
+                    <tr><td colspan="8" class="table-state">正在加载比赛数据...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="pagination"></div>
+    </section>
+</main>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // ═══ State Management ═══
-    let currentLeague = 'all';
-    let currentStatus = 'upcoming';  // 默认显示即将开始的比赛
-    let currentPage = 1;
-    const perPage = 24;
-
-    // ═══ DOM Ready Check ═══
-    const waitForDOM = () => {
-        return new Promise(resolve => {
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', resolve);
-            } else {
-                resolve();
-            }
-        });
+    window.K38_BOOTSTRAP = {
+        season: "{{ current_season|default('2026') }}",
+        leagues: [
+            {% for lid, color in leagues.items() %}
+            { id: "{{ lid }}", name: "{{ league_names.get(lid, lid) }}", color: "{{ color }}" }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ]
     };
 
-    // ═══ Event Handlers ═══
-    const initFilters = () => {
-        const leagueFilters = document.getElementById('leagueFilters');
-        const statusFilters = document.getElementById('statusFilters');
+    (() => {
+        'use strict';
 
-        if (!leagueFilters || !statusFilters) {
-            console.error('过滤器元素未找到');
-            return;
-        }
+        const state = {
+            league: 'all',
+            status: 'all',
+            season: window.K38_BOOTSTRAP.season || '2026',
+            page: 1,
+            latestMatches: []
+        };
 
-        // League Filter
-        leagueFilters.addEventListener('click', e => {
-            const btn = e.target.closest('.pill');
-            if (!btn) return;
+        const els = {
+            date: document.getElementById('dateSelect'),
+            leagueFilters: document.getElementById('leagueFilters'),
+            statusFilters: document.getElementById('statusFilters'),
+            statusRow: document.getElementById('statusFilterRow'),
+            rows: document.getElementById('matchRows'),
+            pagination: document.getElementById('pagination'),
+            summary: document.getElementById('resultSummary'),
+            hotMatches: document.getElementById('hotMatches'),
+            hotCount: document.getElementById('hotMatchCount'),
+            predictions: document.getElementById('sidePredictions'),
+            predictionCount: document.getElementById('predictionCount'),
+            metricTotal: document.getElementById('metricTotal'),
+            metricLive: document.getElementById('metricLive'),
+            metricUpcoming: document.getElementById('metricUpcoming'),
+            metricFinished: document.getElementById('metricFinished')
+        };
 
-            document.querySelectorAll('#leagueFilters .pill').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentLeague = btn.dataset.league;
-            currentPage = 1;
-            loadMatches();
-        });
+        const esc = value => K38.esc(value ?? '');
+        const dash = value => value === null || value === undefined || value === '' ? '—' : esc(value);
 
-        // Status Filter
-        statusFilters.addEventListener('click', e => {
-            const btn = e.target.closest('.pill');
-            if (!btn) return;
-
-            document.querySelectorAll('#statusFilters .pill').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentStatus = btn.dataset.status;
-            currentPage = 1;
-            loadMatches();
-        });
-    };
-
-    // ═══ Pagination ═══
-    window.loadPage = (page) => {
-        currentPage = page;
-        loadMatches();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    // ═══ Stats Update ═══
-    const updateStats = (counts) => {
-        K38.animateNumber(document.getElementById('heroLive'), counts.live || 0);
-        K38.animateNumber(document.getElementById('heroUpcoming'), counts.upcoming || 0);
-        K38.animateNumber(document.getElementById('heroFinished'), counts.finished || 0);
-
-        document.getElementById('countAll').textContent = counts.total || 0;
-        document.getElementById('countLive').textContent = counts.live || 0;
-        document.getElementById('countUpcoming').textContent = counts.upcoming || 0;
-        document.getElementById('countFinished').textContent = counts.finished || 0;
-    };
-
-    // ═══ Match Rendering ═══
-    const renderMatch = (m) => {
-        const isLive = m.status_sort <= 2;
-        const isFinished = m.status_sort === 4;
-        const isUpcoming = m.status_sort === 3;
-
-        // Badge
-        let badge = '';
-        if (isLive) {
-            badge = `<span class="match-badge live"><span class="live-dot"></span>${m.elapsed || 0}'</span>`;
-        } else if (isFinished) {
-            badge = `<span class="match-badge finished">全场结束</span>`;
-        } else {
-            badge = `<span class="match-badge upcoming">${K38.formatTime(m.match_date)}</span>`;
-        }
-
-        // Score Display
-        let scoreDisplay = '';
-        if (isUpcoming) {
-            scoreDisplay = `
-                <div class="score-upcoming">
-                    <span>VS</span>
-                    <small>${K38.formatTime(m.match_date)}</small>
-                </div>
-            `;
-        } else {
-            const hwClass = (m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals) ? 'winner' : '';
-            const awClass = (m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals) ? 'winner' : '';
-            scoreDisplay = `
-                <div class="score-display">
-                    <span class="score-num ${hwClass}">${m.home_goals ?? '?'}</span>
-                    <span class="score-sep">:</span>
-                    <span class="score-num ${awClass}">${m.away_goals ?? '?'}</span>
-                </div>
-            `;
-        }
-
-        // Teams
-        const homeTeam = renderTeam(m, 'home');
-        const awayTeam = renderTeam(m, 'away');
-
-        // Prediction
-        const predictionHtml = isUpcoming && m.prediction ? renderPrediction(m) : '';
-
-        // Bottom Info
-        const htScore = m.halftime_home !== null ? `HT ${m.halftime_home}:${m.halftime_away}` : '';
-        const venue = m.venue ? `📍 ${K38.esc(m.venue)}` : '';
-        const bottomHtml = htScore || venue ? `
-            <div class="card-bottom">
-                <span>${htScore}</span>
-                <span>${venue}</span>
-            </div>
-        ` : '';
-
-        return `
-            <a href="/match/${m.fixture_id}" class="match-card" style="--accent: ${m.league_color}">
-                <div class="card-top">
-                    <span class="card-league">
-                        <span class="league-badge" style="background: ${m.league_color}"></span>
-                        ${K38.esc(m.league_name)}${m.round ? ' · ' + K38.esc(m.round) : ''}
-                    </span>
-                    ${badge}
-                </div>
-                <div class="card-main">
-                    ${homeTeam}
-                    ${scoreDisplay}
-                    ${awayTeam}
-                </div>
-                ${bottomHtml}
-                ${predictionHtml}
-            </a>
-        `;
-    };
-
-    const renderTeam = (m, side) => {
-        const flag = m[`${side}_flag`] || '';
-        const enName = m[`${side}_team_en`] || m[`${side}_team`] || '';
-        const cnName = m[`${side}_team_cn`] || '';
-
-        const displayName = enName;
-        const secondaryName = cnName && cnName !== enName ? cnName : '';
-
-        return `
-            <div class="card-team ${side}">
-                <div class="team-primary">
-                    ${flag ? `<span class="team-flag">${flag}</span>` : ''}
-                    <span>${K38.esc(displayName)}</span>
-                </div>
-                ${secondaryName ? `<div class="team-secondary">${K38.esc(secondaryName)}</div>` : ''}
-            </div>
-        `;
-    };
-
-    const renderPrediction = (m) => {
-        const p = m.prediction;
-        if (!p || p.insufficient_data) return '';
-
-        const winnerText = p.winner === 'home' ? '主队获胜' : p.winner === 'away' ? '客队获胜' : '平局';
-        const winnerIcon = p.winner === 'home' ? '🏠' : p.winner === 'away' ? '✈️' : '🤝';
-
-        return `
-            <div class="prediction-box">
-                <div>
-                    <span style="font-size: 14px; font-weight: 700; color: var(--text-primary);">
-                        ${winnerIcon} ${winnerText}
-                    </span>
-                    <strong>${p.confidence}%</strong>
-                </div>
-                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">
-                    主 ${p.home_win_prob}% · 平 ${p.draw_prob}% · 客 ${p.away_win_prob}%
-                </div>
-            </div>
-        `;
-    };
-
-    // ═══ Main Load Function ═══
-    const loadMatches = async () => {
-        const container = document.getElementById('matchesContainer');
-        if (!container) {
-            console.error('matchesContainer 元素未找到');
-            return;
-        }
-
-        container.innerHTML = K38.skeleton(6);
-        console.log('📡 加载比赛数据...', { league: currentLeague, status: currentStatus, page: currentPage });
-
-        try {
-            const params = new URLSearchParams({
-                league: currentLeague,
-                status: currentStatus,
-                page: currentPage,
-                per_page: perPage
+        function setActive(container, attr, value) {
+            container.querySelectorAll('.segment').forEach(button => {
+                button.classList.toggle('active', button.dataset[attr] === value);
             });
+        }
 
-            const data = await K38.jsonFetch(`/api/matches?${params}`);
-            console.log('✅ 数据加载成功:', data);
-            const matches = data.matches || [];
-            const counts = data.counts || {};
+        function buildApiUrl() {
+            const params = new URLSearchParams({
+                league: state.league,
+                status: state.status,
+                season: state.season,
+                page: state.page
+            });
+            return `/api/matches?${params.toString()}`;
+        }
 
-            // Update UI
-            K38.setStatus(data.is_mock);
-            updateStats(counts);
+        async function loadMatches() {
+            els.rows.innerHTML = '<tr><td colspan="8" class="table-state">正在加载比赛数据...</td></tr>';
+            els.summary.textContent = '加载中';
+            try {
+                const data = await K38.jsonFetch(buildApiUrl());
+                state.latestMatches = data.matches || [];
+                renderMetrics(data.counts || {});
+                renderHotMatches(state.latestMatches);
+                renderPredictions(state.latestMatches);
+                renderRows(state.latestMatches);
+                renderPagination(data.pagination || {});
+                renderSummary(data);
+                K38.setStatus(data.is_mock, data.updated_at ? `更新于 ${data.updated_at}` : '在线', data.is_mock ? 'mock' : 'online');
+            } catch (error) {
+                els.rows.innerHTML = `<tr><td colspan="8" class="table-state">${esc(error.message || '加载失败')}</td></tr>`;
+                els.pagination.innerHTML = '';
+                els.summary.textContent = '加载失败';
+                K38.setStatus(true, '接口异常', 'mock');
+            }
+        }
 
-            if (matches.length === 0) {
-                // 人性化的空状态提示
-                let emptyMsg = '当前没有比赛';
-                if (currentStatus === 'live') {
-                    emptyMsg = '当前没有直播比赛 😊\n看看即将开始的吧！';
-                } else if (currentStatus === 'upcoming') {
-                    emptyMsg = '暂时没有即将开始的比赛\n稍后再来看看吧';
-                } else if (currentStatus === 'finished') {
-                    emptyMsg = '还没有已结束的比赛';
-                }
-                container.innerHTML = K38.empty(emptyMsg, '⚽');
+        function renderMetrics(counts) {
+            K38.animateNumber(els.metricTotal, Number(counts.total || 0));
+            K38.animateNumber(els.metricLive, Number(counts.live || 0));
+            K38.animateNumber(els.metricUpcoming, Number(counts.upcoming || 0));
+            K38.animateNumber(els.metricFinished, Number(counts.finished || 0));
+        }
+
+        function renderHotMatches(matches) {
+            const hot = [...matches]
+                .sort((a, b) => Number(a.status_sort || 9) - Number(b.status_sort || 9))
+                .slice(0, 4);
+            els.hotCount.textContent = `${hot.length} 场`;
+            els.hotMatches.innerHTML = hot.length ? hot.map(match => `
+                <a class="hot-match" href="/match/${encodeURIComponent(match.fixture_id)}">
+                    <strong>${teamLine(match, 'home')} vs ${teamLine(match, 'away')}</strong>
+                    <span>${dash(match.league_name)} · ${scoreText(match)} · ${statusText(match)}</span>
+                </a>
+            `).join('') : '<div class="table-state">暂无热门比赛</div>';
+        }
+
+        function renderPredictions(matches) {
+            const predictions = matches.filter(match => match.prediction).slice(0, 5);
+            els.predictionCount.textContent = `${predictions.length} 条`;
+            els.predictions.innerHTML = predictions.length ? predictions.map(match => {
+                const p = match.prediction || {};
+                const target = p.predicted_winner || p.predicted_result || p.recommendation || '待定';
+                const confidence = formatPercent(p.confidence);
+                return `
+                    <a class="prediction-item" href="/match/${encodeURIComponent(match.fixture_id)}">
+                        <strong>${teamLine(match, 'home')} vs ${teamLine(match, 'away')}</strong>
+                        <span>${esc(target)}${confidence ? ` · ${confidence}` : ''}</span>
+                    </a>
+                `;
+            }).join('') : '<div class="table-state">暂无今日预测</div>';
+        }
+
+        function renderRows(matches) {
+            if (!matches.length) {
+                els.rows.innerHTML = '<tr><td colspan="8" class="table-state">当前筛选暂无比赛</td></tr>';
                 return;
             }
 
-            // Group by date
-            const groups = {};
-            matches.forEach(m => {
-                const key = K38.dateKey(m.match_date);
-                if (!groups[key]) groups[key] = [];
-                groups[key].push(m);
-            });
-
-            // Sort by date - 最新的在前面 (降序)
-            const sorted = Object.entries(groups).sort(([a], [b]) => K38.dateOrder(b) - K38.dateOrder(a));
-
-            // Render
-            container.innerHTML = sorted.map(([key, items]) => `
-                <div class="date-group">
-                    <div class="date-header">
-                        <span>${K38.dateLabel(key)}</span>
-                        <span class="date-count">${items.length} 场比赛</span>
-                    </div>
-                    <div class="match-cards">
-                        ${items.map(renderMatch).join('')}
-                    </div>
-                </div>
-            `).join('') + K38.pagination(data.pagination, 'loadPage');
-
-            K38.animateIn('.match-card', container);
-            console.log(`✨ 渲染完成: ${matches.length} 场比赛`);
-
-        } catch (error) {
-            console.error('❌ 加载失败:', error);
-            container.innerHTML = K38.empty(`加载失败: ${error.message}`, '❌');
+            els.rows.innerHTML = matches.map(match => `
+                <tr>
+                    <td>${statusPill(match)}</td>
+                    <td>${teamCell(match, 'home')}</td>
+                    <td class="score-cell">${scoreText(match)}</td>
+                    <td>${teamCell(match, 'away')}</td>
+                    <td class="odds-cell">${oddsText(match, 'initial')}</td>
+                    <td class="odds-cell">${oddsText(match, 'live')}</td>
+                    <td class="possession-cell">${possessionText(match)}</td>
+                    <td><a class="predict-link" href="/match/${encodeURIComponent(match.fixture_id)}">查看预测</a></td>
+                </tr>
+            `).join('');
         }
-    };
 
-    // ═══ Initialize ═══
-    (async () => {
-        await waitForDOM();
-        console.log('🚀 K38 Football v3.0 初始化...');
-        initFilters();
-        loadMatches();
+        function renderPagination(meta) {
+            els.pagination.innerHTML = K38.pagination(meta, 'loadIndexPage');
+        }
 
-        // Auto-refresh live matches every 30s
-        setInterval(() => {
-            if (currentStatus === 'live' || currentStatus === 'all') {
-                console.log('♻️ 自动刷新直播数据...');
-                loadMatches();
+        function renderSummary(data) {
+            const page = data.pagination || {};
+            const total = Number(data.total || page.total || 0);
+            els.summary.textContent = total ? `共 ${total} 场 · 第 ${page.page || state.page}/${page.pages || 1} 页` : '暂无结果';
+        }
+
+        function statusPill(match) {
+            const type = statusType(match);
+            return `<span class="status-pill ${type}">${esc(match.emoj || '')} ${statusText(match)}</span>`;
+        }
+
+        function statusType(match) {
+            if (Number(match.status_sort) === 1) return 'live';
+            if (Number(match.status_sort) === 3) return 'upcoming';
+            if (Number(match.status_sort) === 4) return 'finished';
+            return '';
+        }
+
+        function statusText(match) {
+            if (Number(match.status_sort) === 1) return esc(match.elapsed ? `${match.elapsed}'` : (match.status || 'LIVE'));
+            if (Number(match.status_sort) === 3) return esc(match.match_date ? K38.formatTime(match.match_date) : (match.status || '未开始'));
+            if (Number(match.status_sort) === 4) return esc(match.status || 'FT');
+            return esc(match.status || '待定');
+        }
+
+        function teamCell(match, side) {
+            const cn = match[`${side}_team_cn`] || match[`${side}_team`];
+            const en = match[`${side}_team_en`] || match[`${side}_team`];
+            const flag = match[`${side}_flag`] || '';
+            return `
+                <div class="team-cell">
+                    <strong>${esc(flag ? `${flag} ${cn || en}` : (cn || en || '待定'))}</strong>
+                    <span>${esc(en && en !== cn ? en : (match[`${side}_team`] || ''))}</span>
+                </div>
+            `;
+        }
+
+        function teamLine(match, side) {
+            return esc(match[`${side}_team_cn`] || match[`${side}_team_en`] || match[`${side}_team`] || '待定');
+        }
+
+        function scoreText(match) {
+            if (match.score_display) return esc(match.score_display);
+            const home = match.home_goals;
+            const away = match.away_goals;
+            return home === null || home === undefined || away === null || away === undefined ? '-:-' : `${esc(home)}:${esc(away)}`;
+        }
+
+        function oddsText(match, kind) {
+            const direct = kind === 'initial'
+                ? (match.initial_odds || match.opening_odds || match.pre_odds)
+                : (match.live_odds || match.current_odds || match.realtime_odds);
+            if (direct) return Array.isArray(direct) ? direct.map(dash).join(' / ') : dash(direct);
+            const odds = match.odds || {};
+            const group = odds[kind] || odds[kind === 'initial' ? 'opening' : 'live'] || {};
+            const values = [group.home, group.draw, group.away].filter(value => value !== undefined && value !== null && value !== '');
+            return values.length ? values.map(dash).join(' / ') : '—';
+        }
+
+        function possessionText(match) {
+            const stats = match.stats || {};
+            const homeId = match.home_team_id;
+            const awayId = match.away_team_id;
+            const candidates = [
+                ['home_possession', 'away_possession'],
+                [`Ball Possession_${homeId}`, `Ball Possession_${awayId}`],
+                [`ball_possession_${homeId}`, `ball_possession_${awayId}`]
+            ];
+
+            for (const [homeKey, awayKey] of candidates) {
+                if (stats[homeKey] || stats[awayKey] || match[homeKey] || match[awayKey]) {
+                    return `${dash(stats[homeKey] || match[homeKey])} / ${dash(stats[awayKey] || match[awayKey])}`;
+                }
             }
-        }, 30000);
+            return '—';
+        }
+
+        function formatPercent(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) return '';
+            return `${Math.round(number <= 1 ? number * 100 : number)}%`;
+        }
+
+        window.loadIndexPage = page => {
+            state.page = Math.max(1, Number(page || 1));
+            loadMatches();
+        };
+
+        els.leagueFilters.addEventListener('click', event => {
+            const button = event.target.closest('[data-league]');
+            if (!button) return;
+            state.league = button.dataset.league;
+            state.status = 'all';
+            state.page = 1;
+            setActive(els.leagueFilters, 'league', state.league);
+            setActive(els.statusFilters, 'status', state.status);
+            els.statusRow.classList.toggle('is-hidden', state.league === 'all');
+            loadMatches();
+        });
+
+        els.statusFilters.addEventListener('click', event => {
+            const button = event.target.closest('[data-status]');
+            if (!button) return;
+            state.status = button.dataset.status;
+            state.page = 1;
+            setActive(els.statusFilters, 'status', state.status);
+            loadMatches();
+        });
+
+        els.date.value = new Date().toISOString().slice(0, 10);
+        els.date.addEventListener('change', () => {
+            state.page = 1;
+            loadMatches();
+        });
+
+        loadMatches();
     })();
 </script>
 {% endblock %}
