@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>K38 足球 v3 — 数据驱动</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0e17;color:#c8d6e5;font-family:'SF Mono','JetBrains Mono',monospace}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid #1a2744}
+.header h1{font-size:16px;color:#00d2ff;font-weight:400}
+.header h1 em{font-style:normal;color:#5f7d9c}
+.nav a{color:#5f7d9c;text-decoration:none;font-size:12px;margin-left:16px;padding:4px 10px;border-radius:4px}
+.nav a.active{color:#00d2ff;border:1px solid #00d2ff44}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 24px}
+.metric{background:#0f1a2e;border-radius:6px;padding:10px 14px;border:1px solid #1a2744}
+.metric .label{font-size:10px;color:#5f7d9c;text-transform:uppercase;letter-spacing:1px}
+.metric .value{font-size:20px;font-weight:700;color:#00d2ff;margin-top:2px}
+.metric .value.green{color:#22c55e}
+.metric .value.yellow{color:#eab308}
+.filters{padding:8px 24px;display:flex;gap:6px;flex-wrap:wrap}
+.filters .pill{padding:4px 12px;border-radius:4px;border:1px solid #1a2744;background:transparent;color:#5f7d9c;font-size:11px;cursor:pointer;font-family:inherit}
+.filters .pill.active{background:#00d2ff11;color:#00d2ff;border-color:#00d2ff44}
+.filters .pill .n{color:#5f7d9c;margin-left:4px}
+.table-header{display:grid;grid-template-columns:2fr 1fr 2fr 60px 80px 80px 60px;padding:8px 24px;font-size:10px;color:#5f7d9c;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #1a2744}
+.match-row{display:grid;grid-template-columns:2fr 1fr 2fr 60px 80px 80px 60px;padding:10px 24px;align-items:center;border-bottom:1px solid #0f1a2e;cursor:pointer;transition:background .2s;font-size:13px}
+.match-row:hover{background:#0f1a2e}
+.match-row .team{display:flex;align-items:center;gap:6px}
+.match-row .team.away{justify-content:flex-end}
+.match-row .score{text-align:center;font-weight:700;font-size:16px;color:#fff}
+.match-row .status{text-align:center;font-size:11px}
+.match-row .status.live{color:#22c55e}
+.match-row .stat-bar{height:3px;border-radius:2px;background:#1a2744;overflow:hidden}
+.match-row .stat-bar .fill{height:100%;background:#00d2ff;border-radius:2px}
+.match-row .stat-val{font-size:11px;color:#5f7d9c;text-align:center}
+.pagination{display:flex;justify-content:center;gap:8px;padding:16px}
+.pagination button{padding:6px 16px;border-radius:4px;border:1px solid #1a2744;background:#0f1a2e;color:#c8d6e5;cursor:pointer;font-family:inherit;font-size:12px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⚽ K38<span>数据</span><em> / football</em></h1>
+  <div class="nav"><a href="#" class="active">比分</a><a href="#">预测</a><a href="#">积分榜</a></div>
+</div>
+<div class="metrics">
+  <div class="metric"><div class="label">总场次</div><div class="value">1,069</div></div>
+  <div class="metric"><div class="label">直播中</div><div class="value green">3</div></div>
+  <div class="metric"><div class="label">未开始</div><div class="value yellow">85</div></div>
+  <div class="metric"><div class="label">已结束</div><div class="value" style="color:#5f7d9c">984</div></div>
+</div>
+<div class="filters">
+  <button class="pill active">全部联赛<span class="n">1069</span></button>
+  <button class="pill">🏆 2026世界杯<span class="n">104</span></button>
+  <button class="pill">🇬🇧 英超<span class="n">380</span></button>
+  <button class="pill">🇪🇸 西甲</button>
+  <button class="pill">🇮🇹 意甲</button>
+  <button class="pill" style="margin-left:auto">🟢 全部状态</button>
+  <button class="pill">🟢 直播</button>
+  <button class="pill">📋 未开始</button>
+  <button class="pill">🏁 已结束</button>
+</div>
+<div class="table-header">
+  <span>主队</span><span></span><span style="text-align:right">客队</span><span style="text-align:center">比分</span><span style="text-align:center">状态</span><span style="text-align:center">控球</span><span style="text-align:center">射门</span>
+</div>
+<div class="match-row">
+  <div class="team"><span>🇦🇷</span>阿根廷</div>
+  <div></div>
+  <div class="team away">克罗地亚<span>🇭🇷</span></div>
+  <div class="score">2:1</div>
+  <div class="status live">🟢 67'</div>
+  <div class="stat-val">58%</div>
+  <div class="stat-val">12</div>
+</div>
+<div class="match-row">
+  <div class="team"><span>🏴󠁧󠁢󠁥󠁮󠁧󠁿</span>英格兰</div>
+  <div></div>
+  <div class="team away">克罗地亚<span>🇭🇷</span></div>
+  <div class="score" style="color:#5f7d9c">-</div>
+  <div class="status" style="color:#eab308">📋 20:00</div>
+  <div class="stat-val">—</div>
+  <div class="stat-val">—</div>
+</div>
+<div class="match-row">
+  <div class="team"><span>🇧🇷</span>巴西</div>
+  <div></div>
+  <div class="team away">日本<span>🇯🇵</span></div>
+  <div class="score">3:0</div>
+  <div class="status" style="color:#5f7d9c">🏁 FT</div>
+  <div class="stat-val">62%</div>
+  <div class="stat-val">15</div>
+</div>
+<div class="match-row">
+  <div class="team"><span>🇫🇷</span>法国</div>
+  <div></div>
+  <div class="team away">塞内加尔<span>🇸🇳</span></div>
+  <div class="score">1:1</div>
+  <div class="status" style="color:#5f7d9c">🏁 FT</div>
+  <div class="stat-val">55%</div>
+  <div class="stat-val">9</div>
+</div>
+<div class="pagination"><button disabled>← Prev</button><button>Next →</button></div>
+</body>
+</html>

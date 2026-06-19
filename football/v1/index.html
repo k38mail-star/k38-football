@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>K38 足球 v1 — 博彩风格</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0f14;color:#e8eaed;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.header{background:#1a1d24;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2a2d35}
+.header h1{font-size:20px;color:#42affa}
+.header h1 span{color:#e8eaed}
+.nav{display:flex;gap:8px}
+.nav a{color:#888;text-decoration:none;padding:6px 14px;border-radius:6px;font-size:14px}
+.nav a.active{background:#42affa22;color:#42affa}
+.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px 24px}
+.hero-card{background:linear-gradient(135deg,#1a1d24,#22262e);border-radius:12px;padding:16px;border:1px solid #2a2d35}
+.hero-card.live{border-color:#22c55e44}
+.hero-card .label{font-size:11px;color:#666;text-transform:uppercase;margin-bottom:8px}
+.hero-card .live-dot{display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:50%;animation:pulse 1.5s infinite;margin-right:6px}
+@keyframes pulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+.hero-card .score{font-size:32px;font-weight:700;text-align:center;padding:8px 0;letter-spacing:2px}
+.hero-card .score .vs{color:#666;font-size:18px;font-weight:400;margin:0 12px}
+.hero-card .teams{display:flex;justify-content:space-between;font-size:13px;color:#aaa;margin-top:4px}
+.hero-card .meta{display:flex;justify-content:space-between;font-size:11px;color:#666;margin-top:8px;padding-top:8px;border-top:1px solid #2a2d35}
+.filters{display:flex;flex-wrap:wrap;gap:8px;padding:0 24px 16px}
+.filters .pill{padding:6px 16px;border-radius:20px;border:1px solid #2a2d35;background:transparent;color:#888;font-size:13px;cursor:pointer}
+.filters .pill.active{background:#42affa;color:#fff;border-color:#42affa}
+.filters .pill .count{background:#2a2d35;padding:1px 6px;border-radius:10px;font-size:11px;margin-left:4px}
+.filters .pill.active .count{background:#ffffff22}
+.match-list{padding:0 24px;display:grid;gap:8px}
+.match-card{background:#1a1d24;border-radius:10px;padding:14px 18px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border:1px solid #2a2d35;cursor:pointer}
+.match-card:hover{border-color:#42affa44}
+.match-card .team{font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px}
+.match-card .team.home{justify-content:flex-start}
+.match-card .team.away{justify-content:flex-end}
+.match-card .team .flag{font-size:20px}
+.match-card .score-display{text-align:center;padding:0 20px}
+.match-card .score-display .score-big{font-size:24px;font-weight:700;letter-spacing:2px}
+.match-card .score-display .status{font-size:11px;color:#22c55e;margin-top:2px}
+.match-card .score-display .status.finished{color:#888}
+.match-card .score-display .status.upcoming{color:#eab308}
+.match-card .odds{display:flex;gap:4px;margin-top:6px;justify-content:center}
+.match-card .odds span{padding:2px 10px;background:#2a2d35;border-radius:4px;font-size:11px;color:#eab308}
+.pagination{display:flex;justify-content:center;gap:8px;padding:20px 24px}
+.pagination button{padding:8px 20px;border-radius:8px;border:1px solid #2a2d35;background:#1a1d24;color:#e8eaed;cursor:pointer}
+.pagination button:hover{background:#42affa22}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⚽ K38<span>足球</span></h1>
+  <div class="nav">
+    <a href="#" class="active">比分</a>
+    <a href="#">预测</a>
+    <a href="#">积分榜</a>
+  </div>
+</div>
+
+<div class="hero">
+  <div class="hero-card live">
+    <div class="label"><span class="live-dot"></span>直播中</div>
+    <div class="score">2<span class="vs">:</span>1</div>
+    <div class="teams"><span>🇦🇷 阿根廷</span><span>🇭🇷 克罗地亚</span></div>
+    <div class="meta"><span>⚽ 67'</span><span>📊 12/8 射门</span></div>
+  </div>
+  <div class="hero-card">
+    <div class="label">📋 即将开始</div>
+    <div class="score">—<span class="vs">vs</span>—</div>
+    <div class="teams"><span>🏴󠁧󠁢󠁥󠁮󠁧󠁿 英格兰</span><span>🇭🇷 克罗地亚</span></div>
+    <div class="meta"><span>20:00</span><span>🏟️ 温布利</span></div>
+  </div>
+  <div class="hero-card">
+    <div class="label">🏁 已结束</div>
+    <div class="score">3<span class="vs">:</span>0</div>
+    <div class="teams"><span>🇧🇷 巴西</span><span>🇯🇵 日本</span></div>
+    <div class="meta"><span>FT</span><span>⚽ 内马尔·理查利森·小熊</span></div>
+  </div>
+</div>
+
+<div class="filters">
+  <button class="pill active">全部 <span class="count">1069</span></button>
+  <button class="pill">🏆 2026世界杯 <span class="count">104</span></button>
+  <button class="pill">🇬🇧 英超 <span class="count">380</span></button>
+  <button class="pill">🇪🇸 西甲</button>
+  <button class="pill">🇮🇹 意甲</button>
+  <button class="pill">🇩🇪 德甲</button>
+</div>
+<div class="filters" style="padding-top:0">
+  <button class="pill active">全部 <span class="count">1069</span></button>
+  <button class="pill">🟢 直播 <span class="count">3</span></button>
+  <button class="pill">📋 未开始 <span class="count">85</span></button>
+  <button class="pill">🏁 已结束 <span class="count">984</span></button>
+</div>
+
+<div class="match-list">
+  <div class="match-card">
+    <div class="team home"><span class="flag">🇦🇷</span>阿根廷</div>
+    <div class="score-display"><div class="score-big">2:1</div><div class="status">🟢 67'</div><div class="odds"><span>1.45</span><span>4.50</span><span>7.00</span></div></div>
+    <div class="team away">克罗地亚<span class="flag">🇭🇷</span></div>
+  </div>
+  <div class="match-card">
+    <div class="team home"><span class="flag">🏴󠁧󠁢󠁥󠁮󠁧󠁿</span>英格兰</div>
+    <div class="score-display"><div class="score-big">-:-</div><div class="status upcoming">📋 20:00</div><div class="odds"><span>1.85</span><span>3.40</span><span>4.50</span></div></div>
+    <div class="team away">克罗地亚<span class="flag">🇭🇷</span></div>
+  </div>
+  <div class="match-card">
+    <div class="team home"><span class="flag">🇧🇷</span>巴西</div>
+    <div class="score-display"><div class="score-big">3:0</div><div class="status finished">🏁 FT</div><div class="odds"><span>—</span><span>—</span><span>—</span></div></div>
+    <div class="team away">日本<span class="flag">🇯🇵</span></div>
+  </div>
+</div>
+
+<div class="pagination">
+  <button disabled>← 上一页</button>
+  <button>下一页 →</button>
+</div>
+</body>
+</html>

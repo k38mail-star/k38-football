@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>K38 足球 v4 — 沉浸式直播</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;overflow-x:hidden}
+.bg-glow{position:fixed;top:-30%;left:-20%;width:60%;height:80%;background:radial-gradient(ellipse,#00d2ff08,#0000);pointer-events:none;z-index:0}
+.bg-glow2{position:fixed;bottom:-20%;right:-20%;width:50%;height:60%;background:radial-gradient(ellipse,#22c55e06,#0000);pointer-events:none;z-index:0}
+.header{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;padding:20px 24px 12px}
+.header h1{font-size:24px;font-weight:800;background:linear-gradient(135deg,#42affa,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav{display:flex;gap:2px;background:#ffffff08;border-radius:10px;padding:3px}
+.nav a{padding:8px 18px;border-radius:8px;color:#888;text-decoration:none;font-size:13px;font-weight:500;transition:all .3s}
+.nav a.active{background:#ffffff15;color:#fff}
+.live-bar{position:relative;z-index:1;display:flex;align-items:center;gap:16px;padding:8px 24px;overflow:hidden}
+.live-bar .now{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.live-bar .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;animation:pulse 1.2s infinite;box-shadow:0 0 12px #22c55e66}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+.live-bar .marquee{display:flex;gap:24px;overflow:hidden;font-size:13px;color:#aaa}
+.live-bar .marquee span{white-space:nowrap}
+.live-bar .marquee .gl{color:#22c55e;font-weight:600}
+.spotlight{position:relative;z-index:1;padding:12px 24px}
+.spotlight-card{background:linear-gradient(135deg,#ffffff08,#ffffff03);border-radius:16px;padding:24px;border:1px solid #ffffff15;backdrop-filter:blur(20px)}
+.spotlight-card .matchup{display:flex;align-items:center;justify-content:center;gap:24px;padding:20px 0}
+.spotlight-card .matchup .team{text-align:center}
+.spotlight-card .matchup .team .flag{font-size:56px;display:block;margin-bottom:8px}
+.spotlight-card .matchup .team .name{font-size:16px;font-weight:600}
+.spotlight-card .matchup .score-big{font-size:64px;font-weight:800;background:linear-gradient(180deg,#fff,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:4px}
+.spotlight-card .matchup .score-big.live{background:linear-gradient(180deg,#22c55e,#22c55e66);-webkit-background-clip:text}
+.spotlight-card .meta-info{display:flex;justify-content:center;gap:24px;font-size:13px;color:#888}
+.spotlight-card .meta-info span{display:flex;align-items:center;gap:6px}
+.grid-3{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 24px}
+.mini-card{background:#ffffff08;border-radius:10px;padding:12px;border:1px solid #ffffff0a;cursor:pointer;transition:all .3s}
+.mini-card:hover{background:#ffffff10;border-color:#ffffff20}
+.mini-card .teams{display:flex;justify-content:space-between;align-items:center}
+.mini-card .teams .names{font-size:12px;line-height:1.6}
+.mini-card .teams .sc{font-size:20px;font-weight:700}
+.mini-card .teams .sc.live{color:#22c55e}
+.mini-card .status-line{display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:6px;padding-top:6px;border-top:1px solid #ffffff0a}
+.section-title{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;padding:16px 24px 8px}
+.section-title h2{font-size:15px;font-weight:600;color:#fff}
+.section-title .pills{display:flex;gap:6px}
+.section-title .pills .p{padding:4px 12px;border-radius:12px;border:1px solid #ffffff15;background:transparent;color:#888;font-size:11px;cursor:pointer}
+.section-title .pills .p.active{background:#42affa22;border-color:#42affa44;color:#42affa}
+.match-row{position:relative;z-index:1;display:flex;align-items:center;padding:10px 24px;border-bottom:1px solid #ffffff06;cursor:pointer;transition:background .3s}
+.match-row:hover{background:#ffffff06}
+.match-row .time{width:50px;font-size:11px;color:#666}
+.match-row .teams{flex:1;display:grid;gap:3px}
+.match-row .teams .r{display:flex;justify-content:space-between;font-size:13px}
+.match-row .teams .r .n{color:#ccc}
+.match-row .teams .r .g{color:#fff;font-weight:600;min-width:20px;text-align:right}
+.match-row .league-tag{font-size:10px;color:#555;width:70px;text-align:right}
+.pagination{position:relative;z-index:1;display:flex;justify-content:center;gap:8px;padding:16px}
+.pagination button{padding:8px 20px;border-radius:8px;border:1px solid #ffffff15;background:#ffffff08;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div><div class="bg-glow2"></div>
+<div class="header">
+  <h1>⚽ K38</h1>
+  <div class="nav"><a href="#" class="active">比分</a><a href="#">预测</a><a href="#">积分榜</a></div>
+</div>
+<div class="live-bar">
+  <span class="now"><span class="dot"></span>直播中</span>
+  <div class="marquee">
+    <span>🇦🇷 阿根廷 <span class="gl">2-1</span> 克罗地亚 🇭🇷 · 67'</span>
+    <span>🇺🇸 美国 <span class="gl">1-0</span> 澳大利亚 🇦🇺 · 32'</span>
+    <span>🇩🇪 德国 <span class="gl">0-0</span> 科特迪瓦 🇨🇮 · 15'</span>
+  </div>
+</div>
+<div class="spotlight">
+  <div class="spotlight-card">
+    <div class="matchup">
+      <div class="team"><span class="flag">🇦🇷</span><span class="name">阿根廷</span></div>
+      <div class="score-big live">2:1</div>
+      <div class="team"><span class="flag">🇭🇷</span><span class="name">克罗地亚</span></div>
+    </div>
+    <div class="meta-info">
+      <span>🟢 67' · 小组赛</span>
+      <span>📊 射门 12:8</span>
+      <span>⚡ 控球 58%:42%</span>
+    </div>
+  </div>
+</div>
+<div class="grid-3">
+  <div class="mini-card"><div class="teams"><div class="names">🏴󠁧󠁢󠁥󠁮󠁧󠁿 英格兰<br>🇭🇷 克罗地亚</div><div class="sc">-:-</div></div><div class="status-line"><span>📋 20:00</span><span>🏟️ 温布利</span></div></div>
+  <div class="mini-card"><div class="teams"><div class="names">🇧🇷 巴西<br>🇯🇵 日本</div><div class="sc">3:0</div></div><div class="status-line"><span>🏁 FT</span><span>⚽ 内马尔</span></div></div>
+  <div class="mini-card"><div class="teams"><div class="names">🇫🇷 法国<br>🇸🇳 塞内加尔</div><div class="sc">1:1</div></div><div class="status-line"><span>🏁 FT</span><span>⚽ 姆巴佩</span></div></div>
+</div>
+<div class="section-title">
+  <h2>全部比赛</h2>
+  <div class="pills"><span class="p active">全部</span><span class="p">🏆世界杯</span><span class="p">🇬🇧英超</span><span class="p">🇪🇸西甲</span></div>
+</div>
+<div class="match-row"><span class="time">67'</span><div class="teams"><div class="r"><span class="n">🇦🇷 阿根廷</span><span class="g">2</span></div><div class="r"><span class="n">🇭🇷 克罗地亚</span><span class="g">1</span></div></div><div class="league-tag" style="color:#22c55e">🟢</div></div>
+<div class="match-row"><span class="time">20:00</span><div class="teams"><div class="r"><span class="n">🏴󠁧󠁢󠁥󠁮󠁧󠁿 英格兰</span><span class="g">—</span></div><div class="r"><span class="n">🇭🇷 克罗地亚</span><span class="g">—</span></div></div><div class="league-tag" style="color:#eab308">📋</div></div>
+<div class="match-row"><span class="time">FT</span><div class="teams"><div class="r"><span class="n">🇧🇷 巴西</span><span class="g">3</span></div><div class="r"><span class="n">🇯🇵 日本</span><span class="g">0</span></div></div><div class="league-tag" style="color:#555">🏁</div></div>
+<div class="pagination"><button disabled>←</button><button>→</button></div>
+</body>
+</html>

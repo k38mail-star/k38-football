@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>K38 足球 v2 — 极简清爽</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#f5f7fa;color:#1a1a2e;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif}
+.header{background:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e8ecf1;position:sticky;top:0;z-index:10}
+.header h1{font-size:18px;font-weight:700;color:#2563eb}
+.header h1 span{color:#1a1a2e;font-weight:400}
+.nav{display:flex;gap:4px}
+.nav a{padding:6px 14px;border-radius:8px;color:#64748b;text-decoration:none;font-size:14px;font-weight:500;transition:all .2s}
+.nav a.active{background:#2563eb;color:#fff}
+.featured{display:flex;gap:10px;padding:16px 20px;overflow-x:auto}
+.featured-card{min-width:200px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 1px 3px #0000000d;flex-shrink:0}
+.featured-card .comp{font-size:11px;color:#94a3b8;margin-bottom:6px}
+.featured-card .teams{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.featured-card .teams .name{font-size:13px;font-weight:500}
+.featured-card .teams .score{font-size:22px;font-weight:700;color:#2563eb}
+.featured-card .teams .score.none{color:#94a3b8}
+.featured-card .status-bar{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:#94a3b8}
+.featured-card .status-bar .live{color:#22c55e;font-weight:600}
+.section{padding:0 20px 12px;display:flex;align-items:center;justify-content:space-between}
+.section h2{font-size:16px;font-weight:600}
+.section .counts{display:flex;gap:12px}
+.section .counts span{font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px}
+.section .counts .num{font-weight:600;color:#1a1a2e}
+.filters{display:flex;gap:6px;padding:0 20px 12px;flex-wrap:wrap}
+.filters .pill{padding:5px 14px;border-radius:16px;border:1px solid #e2e8f0;background:#fff;color:#64748b;font-size:12px;cursor:pointer;transition:all .2s}
+.filters .pill.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.filters .pill .num{background:#f1f5f9;padding:0 6px;border-radius:8px;margin-left:4px;font-size:11px}
+.filters .pill.active .num{background:#ffffff33;color:#fff}
+.matches{padding:0 20px;display:grid;gap:6px}
+.match{background:#fff;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 2px #00000008;cursor:pointer;transition:all .2s}
+.match:hover{box-shadow:0 2px 8px #0000001a}
+.match .league-tag{font-size:10px;color:#94a3b8;width:80px;flex-shrink:0}
+.match .teams{flex:1;display:grid;gap:4px}
+.match .teams .row{display:flex;justify-content:space-between;font-size:14px}
+.match .teams .row .name{font-weight:500}
+.match .teams .row .g{margin-left:auto;min-width:24px;text-align:right;font-weight:600}
+.match .status-tag{font-size:11px;padding:3px 10px;border-radius:12px;text-align:center;min-width:50px}
+.match .status-tag.live{background:#22c55e15;color:#22c55e;font-weight:600}
+.match .status-tag.finished{background:#94a3b815;color:#64748b}
+.match .status-tag.upcoming{background:#eab30815;color:#eab308}
+.pagination{display:flex;justify-content:center;gap:8px;padding:20px}
+.pagination button{padding:8px 18px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer}
+.pagination button:disabled{opacity:.5}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⚽ K38<span> 足球</span></h1>
+  <div class="nav"><a href="#" class="active">比分</a><a href="#">预测</a><a href="#">积分榜</a></div>
+</div>
+<div class="featured">
+  <div class="featured-card"><div class="comp">🏆 2026世界杯 · 67'</div><div class="teams"><div><div class="name">🇦🇷 阿根廷</div><div class="name">🇭🇷 克罗地亚</div></div><div class="score">2:1</div></div><div class="status-bar"><span class="live">🟢 直播中</span><span>📊 12/8 射门</span></div></div>
+  <div class="featured-card"><div class="comp">🏆 2026世界杯 · 20:00</div><div class="teams"><div><div class="name">🏴󠁧󠁢󠁥󠁮󠁧󠁿 英格兰</div><div class="name">🇭🇷 克罗地亚</div></div><div class="score none">-</div></div><div class="status-bar"><span>📋 未开始</span><span>🏟️ 温布利</span></div></div>
+  <div class="featured-card"><div class="comp">🏆 2026世界杯 · FT</div><div class="teams"><div><div class="name">🇧🇷 巴西</div><div class="name">🇯🇵 日本</div></div><div class="score">3:0</div></div><div class="status-bar"><span>🏁 已结束</span><span>⚽ 内马尔</span></div></div>
+</div>
+<div class="section"><h2>⚽ 全部比赛</h2><div class="counts"><span>全部 <span class="num">1,069</span></span><span>🟢 <span class="num">3</span></span><span>📋 <span class="num">85</span></span><span>🏁 <span class="num">984</span></span></div></div>
+<div class="filters">
+  <button class="pill active">全部</button><button class="pill">🏆 世界杯</button><button class="pill">🇬🇧 英超</button><button class="pill">🇪🇸 西甲</button><button class="pill">🇮🇹 意甲</button><button class="pill">🇩🇪 德甲</button>
+</div>
+<div class="matches">
+  <div class="match"><span class="league-tag">🏆 世界杯</span><div class="teams"><div class="row"><span class="name">🇦🇷 阿根廷</span><span class="g">2</span></div><div class="row"><span class="name">🇭🇷 克罗地亚</span><span class="g">1</span></div></div><span class="status-tag live">🟢 67'</span></div>
+  <div class="match"><span class="league-tag">🏆 世界杯</span><div class="teams"><div class="row"><span class="name">🏴󠁧󠁢󠁥󠁮󠁧󠁿 英格兰</span><span class="g">—</span></div><div class="row"><span class="name">🇭🇷 克罗地亚</span><span class="g">—</span></div></div><span class="status-tag upcoming">📋 20:00</span></div>
+  <div class="match"><span class="league-tag">🏆 世界杯</span><div class="teams"><div class="row"><span class="name">🇧🇷 巴西</span><span class="g">3</span></div><div class="row"><span class="name">🇯🇵 日本</span><span class="g">0</span></div></div><span class="status-tag finished">🏁 FT</span></div>
+</div>
+<div class="pagination"><button disabled>←</button><button>→</button></div>
+</body>
+</html>
