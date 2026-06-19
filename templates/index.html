@@ -292,7 +292,8 @@
                 groups[key].push(m);
             });
 
-            const sorted = Object.entries(groups).sort(([a], [b]) => K38.dateOrder(a) - K38.dateOrder(b));
+            // Sort by date - 最新的在前面 (降序)
+            const sorted = Object.entries(groups).sort(([a], [b]) => K38.dateOrder(b) - K38.dateOrder(a));
 
             // Render
             container.innerHTML = sorted.map(([key, items]) => `
