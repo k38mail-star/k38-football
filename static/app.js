@@ -66,12 +66,19 @@ const K38 = (() => {
         </div>
     `;
 
-    const empty = (text, icon = '⚽') => `
-        <div class="empty-state">
-            <span class="empty-icon">${icon}</span>
-            <span>${esc(text)}</span>
-        </div>
-    `;
+    const empty = (text, icon = '⚽') => {
+        // 人性化的空状态提示
+        let friendlyText = text;
+        if (text.includes('暂无比赛')) {
+            friendlyText = '当前筛选条件下没有比赛 😊\n试试其他筛选条件吧';
+        }
+        return `
+            <div class="empty-state">
+                <span class="empty-icon">${icon}</span>
+                <span style="white-space: pre-line;">${esc(friendlyText)}</span>
+            </div>
+        `;
+    };
 
     const pagination = (meta = {}, onClickName = 'loadPage') => {
         if (!meta.pages || meta.pages <= 1) return '';
@@ -126,10 +133,22 @@ const K38 = (() => {
     const formatTime = value => {
         if (!value) return '待定';
         const d = new Date(value);
-        return Number.isNaN(d.getTime()) ? '待定' : d.toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        if (Number.isNaN(d.getTime())) return '待定';
+
+        // 人性化时间显示
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const matchDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const diffDays = Math.floor((matchDay - today) / (1000 * 60 * 60 * 24));
+
+        const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+        if (diffDays === 0) return `今天 ${timeStr}`;
+        if (diffDays === 1) return `明天 ${timeStr}`;
+        if (diffDays === -1) return `昨天 ${timeStr}`;
+        if (diffDays > 1 && diffDays <= 7) return `${diffDays}天后 ${timeStr}`;
+
+        return timeStr;
     };
 
     const dateKey = value => {

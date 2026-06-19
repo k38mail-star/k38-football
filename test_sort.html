@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>排序测试</title>
+</head>
+<body>
+    <h2>日期排序测试</h2>
+    <div id="result"></div>
+    
+    <script>
+        const dateKey = value => {
+            if (!value) return 'unknown';
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? 'unknown' : d.toISOString().slice(0, 10);
+        };
+
+        const dateOrder = key => {
+            return key === 'unknown' ? 9999999999999 : new Date(key + 'T00:00:00').getTime();
+        };
+
+        const testDates = [
+            '1938-06-05',
+            '2026-06-17',
+            '2026-06-20',
+            '1990-06-10',
+            '2024-12-25'
+        ];
+
+        console.log('原始顺序:', testDates);
+        
+        // 升序 (旧的在前)
+        const asc = [...testDates].sort((a, b) => dateOrder(a) - dateOrder(b));
+        console.log('升序 (旧→新):', asc);
+        
+        // 降序 (新的在前) ✅ 正确的顺序
+        const desc = [...testDates].sort((a, b) => dateOrder(b) - dateOrder(a));
+        console.log('降序 (新→旧):', desc);
+        
+        document.getElementById('result').innerHTML = `
+            <h3>升序 (旧的在前):</h3>
+            <pre>${asc.join('\n')}</pre>
+            
+            <h3>降序 (新的在前) ✅:</h3>
+            <pre>${desc.join('\n')}</pre>
+        `;
+    </script>
+</body>
+</html>

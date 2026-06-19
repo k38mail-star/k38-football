@@ -5,16 +5,16 @@
 <section class="hero">
     <div class="hero-stats">
         <div class="hero-stat">
-            <span class="hero-stat-num" id="heroTotal">—</span>
-            <span class="hero-stat-label">总比赛数</span>
-        </div>
-        <div class="hero-stat">
             <span class="hero-stat-num" id="heroLive" style="color: var(--accent-live);">—</span>
-            <span class="hero-stat-label">🔴 直播中</span>
+            <span class="hero-stat-label">🔴 正在直播</span>
         </div>
         <div class="hero-stat">
             <span class="hero-stat-num" id="heroUpcoming">—</span>
             <span class="hero-stat-label">📅 即将开始</span>
+        </div>
+        <div class="hero-stat">
+            <span class="hero-stat-num" id="heroFinished">—</span>
+            <span class="hero-stat-label">🏁 今日已结束</span>
         </div>
     </div>
 </section>
@@ -67,7 +67,7 @@
 <script>
     // ═══ State Management ═══
     let currentLeague = 'all';
-    let currentStatus = 'all';
+    let currentStatus = 'upcoming';  // 默认显示即将开始的比赛
     let currentPage = 1;
     const perPage = 24;
 
@@ -126,9 +126,9 @@
 
     // ═══ Stats Update ═══
     const updateStats = (counts) => {
-        K38.animateNumber(document.getElementById('heroTotal'), counts.total || 0);
         K38.animateNumber(document.getElementById('heroLive'), counts.live || 0);
         K38.animateNumber(document.getElementById('heroUpcoming'), counts.upcoming || 0);
+        K38.animateNumber(document.getElementById('heroFinished'), counts.finished || 0);
 
         document.getElementById('countAll').textContent = counts.total || 0;
         document.getElementById('countLive').textContent = counts.live || 0;
@@ -280,7 +280,16 @@
             updateStats(counts);
 
             if (matches.length === 0) {
-                container.innerHTML = K38.empty('暂无比赛数据', '⚽');
+                // 人性化的空状态提示
+                let emptyMsg = '当前没有比赛';
+                if (currentStatus === 'live') {
+                    emptyMsg = '当前没有直播比赛 😊\n看看即将开始的吧！';
+                } else if (currentStatus === 'upcoming') {
+                    emptyMsg = '暂时没有即将开始的比赛\n稍后再来看看吧';
+                } else if (currentStatus === 'finished') {
+                    emptyMsg = '还没有已结束的比赛';
+                }
+                container.innerHTML = K38.empty(emptyMsg, '⚽');
                 return;
             }
 
