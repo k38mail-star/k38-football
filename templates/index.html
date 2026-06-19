@@ -71,10 +71,29 @@
     let currentPage = 1;
     const perPage = 24;
 
+    // ═══ DOM Ready Check ═══
+    const waitForDOM = () => {
+        return new Promise(resolve => {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', resolve);
+            } else {
+                resolve();
+            }
+        });
+    };
+
     // ═══ Event Handlers ═══
     const initFilters = () => {
+        const leagueFilters = document.getElementById('leagueFilters');
+        const statusFilters = document.getElementById('statusFilters');
+
+        if (!leagueFilters || !statusFilters) {
+            console.error('过滤器元素未找到');
+            return;
+        }
+
         // League Filter
-        document.getElementById('leagueFilters').addEventListener('click', e => {
+        leagueFilters.addEventListener('click', e => {
             const btn = e.target.closest('.pill');
             if (!btn) return;
 
@@ -86,7 +105,7 @@
         });
 
         // Status Filter
-        document.getElementById('statusFilters').addEventListener('click', e => {
+        statusFilters.addEventListener('click', e => {
             const btn = e.target.closest('.pill');
             if (!btn) return;
 
@@ -235,7 +254,13 @@
     // ═══ Main Load Function ═══
     const loadMatches = async () => {
         const container = document.getElementById('matchesContainer');
+        if (!container) {
+            console.error('matchesContainer 元素未找到');
+            return;
+        }
+
         container.innerHTML = K38.skeleton(6);
+        console.log('📡 加载比赛数据...', { league: currentLeague, status: currentStatus, page: currentPage });
 
         try {
             const params = new URLSearchParams({
@@ -246,6 +271,7 @@
             });
 
             const data = await K38.jsonFetch(`/api/matches?${params}`);
+            console.log('✅ 数据加载成功:', data);
             const matches = data.matches || [];
             const counts = data.counts || {};
 
@@ -282,21 +308,28 @@
             `).join('') + K38.pagination(data.pagination, 'loadPage');
 
             K38.animateIn('.match-card', container);
+            console.log(`✨ 渲染完成: ${matches.length} 场比赛`);
 
         } catch (error) {
+            console.error('❌ 加载失败:', error);
             container.innerHTML = K38.empty(`加载失败: ${error.message}`, '❌');
         }
     };
 
     // ═══ Initialize ═══
-    initFilters();
-    loadMatches();
+    (async () => {
+        await waitForDOM();
+        console.log('🚀 K38 Football v3.0 初始化...');
+        initFilters();
+        loadMatches();
 
-    // Auto-refresh live matches every 30s
-    setInterval(() => {
-        if (currentStatus === 'live' || currentStatus === 'all') {
-            loadMatches();
-        }
-    }, 30000);
+        // Auto-refresh live matches every 30s
+        setInterval(() => {
+            if (currentStatus === 'live' || currentStatus === 'all') {
+                console.log('♻️ 自动刷新直播数据...');
+                loadMatches();
+            }
+        }, 30000);
+    })();
 </script>
 {% endblock %}
