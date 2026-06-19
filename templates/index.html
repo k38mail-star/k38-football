@@ -1,95 +1,241 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Hero Section -->
+<!-- Hero Statistics -->
 <section class="hero">
-    <div class="hero-bg"></div>
-    <div class="hero-content">
-        <div class="hero-stats">
-            <div class="hero-stat">
-                <span class="hero-stat-num" id="heroTotal">0</span>
-                <span class="hero-stat-label">今日比赛</span>
-            </div>
-            <div class="hero-stat">
-                <span class="hero-stat-num live" id="heroLive">0</span>
-                <span class="hero-stat-label">直播中</span>
-            </div>
-            <div class="hero-stat">
-                <span class="hero-stat-num" id="heroUpcoming">0</span>
-                <span class="hero-stat-label">即将开始</span>
-            </div>
+    <div class="hero-stats">
+        <div class="hero-stat">
+            <span class="hero-stat-num" id="heroTotal">—</span>
+            <span class="hero-stat-label">总比赛数</span>
+        </div>
+        <div class="hero-stat">
+            <span class="hero-stat-num" id="heroLive" style="color: var(--accent-live);">—</span>
+            <span class="hero-stat-label">🔴 直播中</span>
+        </div>
+        <div class="hero-stat">
+            <span class="hero-stat-num" id="heroUpcoming">—</span>
+            <span class="hero-stat-label">📅 即将开始</span>
         </div>
     </div>
 </section>
 
 <!-- Filters -->
 <section class="filters">
+    <!-- League Filter -->
     <div class="filter-section">
-        <div class="filter-label">联赛</div>
+        <div class="filter-label">🏆 联赛筛选</div>
         <div class="filter-pills" id="leagueFilters">
-            <button class="pill active" data-league="all">全部</button>
+            <button class="pill active" data-league="all">全部联赛</button>
             {% for lid, color in leagues.items() %}
-            <button class="pill" data-league="{{ lid }}" style="--pill-color: {{ color }}">
+            <button class="pill" data-league="{{ lid }}" style="--league-color: {{ color }}">
                 {{ league_icons[loop.index0 % league_icons|length] }} {{ league_names.get(lid, lid) }}
             </button>
             {% endfor %}
         </div>
     </div>
+
+    <!-- Status Filter -->
     <div class="filter-section">
-        <div class="filter-label">状态</div>
+        <div class="filter-label">📊 状态筛选</div>
         <div class="filter-pills" id="statusFilters">
-            <button class="pill active" data-status="all">全部 <span class="pill-count" id="countAll">0</span></button>
-            <button class="pill pill-live" data-status="live">🟢 直播中 <span class="pill-count" id="countLive">0</span></button>
-            <button class="pill pill-upcoming" data-status="upcoming">📋 未开始 <span class="pill-count" id="countUpcoming">0</span></button>
-            <button class="pill pill-finished" data-status="finished">🏁 已结束 <span class="pill-count" id="countFinished">0</span></button>
+            <button class="pill active" data-status="all">
+                全部 <span class="pill-count" id="countAll">0</span>
+            </button>
+            <button class="pill" data-status="live">
+                🔴 直播 <span class="pill-count" id="countLive">0</span>
+            </button>
+            <button class="pill" data-status="upcoming">
+                📋 未开始 <span class="pill-count" id="countUpcoming">0</span>
+            </button>
+            <button class="pill" data-status="finished">
+                🏁 已结束 <span class="pill-count" id="countFinished">0</span>
+            </button>
         </div>
     </div>
 </section>
 
-<!-- Match List -->
+<!-- Match List Container -->
 <section class="matches" id="matchesContainer">
     <div class="loading-screen">
         <div class="loading-spinner"></div>
-        <span>加载比赛数据...</span>
+        <span>正在加载比赛数据...</span>
     </div>
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    // ═══ State Management ═══
     let currentLeague = 'all';
     let currentStatus = 'all';
     let currentPage = 1;
     const perPage = 24;
 
-    document.getElementById('leagueFilters').addEventListener('click', e => {
-        const btn = e.target.closest('.pill');
-        if (!btn) return;
-        document.querySelectorAll('#leagueFilters .pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentLeague = btn.dataset.league;
-        currentPage = 1;
-        loadMatches();
-    });
+    // ═══ Event Handlers ═══
+    const initFilters = () => {
+        // League Filter
+        document.getElementById('leagueFilters').addEventListener('click', e => {
+            const btn = e.target.closest('.pill');
+            if (!btn) return;
 
-    document.getElementById('statusFilters').addEventListener('click', e => {
-        const btn = e.target.closest('.pill');
-        if (!btn) return;
-        document.querySelectorAll('#statusFilters .pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentStatus = btn.dataset.status;
-        currentPage = 1;
-        loadMatches();
-    });
+            document.querySelectorAll('#leagueFilters .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentLeague = btn.dataset.league;
+            currentPage = 1;
+            loadMatches();
+        });
 
-    window.loadPage = page => {
-        currentPage = page;
-        loadMatches();
+        // Status Filter
+        document.getElementById('statusFilters').addEventListener('click', e => {
+            const btn = e.target.closest('.pill');
+            if (!btn) return;
+
+            document.querySelectorAll('#statusFilters .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentStatus = btn.dataset.status;
+            currentPage = 1;
+            loadMatches();
+        });
     };
 
-    async function loadMatches() {
+    // ═══ Pagination ═══
+    window.loadPage = (page) => {
+        currentPage = page;
+        loadMatches();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // ═══ Stats Update ═══
+    const updateStats = (counts) => {
+        K38.animateNumber(document.getElementById('heroTotal'), counts.total || 0);
+        K38.animateNumber(document.getElementById('heroLive'), counts.live || 0);
+        K38.animateNumber(document.getElementById('heroUpcoming'), counts.upcoming || 0);
+
+        document.getElementById('countAll').textContent = counts.total || 0;
+        document.getElementById('countLive').textContent = counts.live || 0;
+        document.getElementById('countUpcoming').textContent = counts.upcoming || 0;
+        document.getElementById('countFinished').textContent = counts.finished || 0;
+    };
+
+    // ═══ Match Rendering ═══
+    const renderMatch = (m) => {
+        const isLive = m.status_sort <= 2;
+        const isFinished = m.status_sort === 4;
+        const isUpcoming = m.status_sort === 3;
+
+        // Badge
+        let badge = '';
+        if (isLive) {
+            badge = `<span class="match-badge live"><span class="live-dot"></span>${m.elapsed || 0}'</span>`;
+        } else if (isFinished) {
+            badge = `<span class="match-badge finished">全场结束</span>`;
+        } else {
+            badge = `<span class="match-badge upcoming">${K38.formatTime(m.match_date)}</span>`;
+        }
+
+        // Score Display
+        let scoreDisplay = '';
+        if (isUpcoming) {
+            scoreDisplay = `
+                <div class="score-upcoming">
+                    <span>VS</span>
+                    <small>${K38.formatTime(m.match_date)}</small>
+                </div>
+            `;
+        } else {
+            const hwClass = (m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals) ? 'winner' : '';
+            const awClass = (m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals) ? 'winner' : '';
+            scoreDisplay = `
+                <div class="score-display">
+                    <span class="score-num ${hwClass}">${m.home_goals ?? '?'}</span>
+                    <span class="score-sep">:</span>
+                    <span class="score-num ${awClass}">${m.away_goals ?? '?'}</span>
+                </div>
+            `;
+        }
+
+        // Teams
+        const homeTeam = renderTeam(m, 'home');
+        const awayTeam = renderTeam(m, 'away');
+
+        // Prediction
+        const predictionHtml = isUpcoming && m.prediction ? renderPrediction(m) : '';
+
+        // Bottom Info
+        const htScore = m.halftime_home !== null ? `HT ${m.halftime_home}:${m.halftime_away}` : '';
+        const venue = m.venue ? `📍 ${K38.esc(m.venue)}` : '';
+        const bottomHtml = htScore || venue ? `
+            <div class="card-bottom">
+                <span>${htScore}</span>
+                <span>${venue}</span>
+            </div>
+        ` : '';
+
+        return `
+            <a href="/match/${m.fixture_id}" class="match-card" style="--accent: ${m.league_color}">
+                <div class="card-top">
+                    <span class="card-league">
+                        <span class="league-badge" style="background: ${m.league_color}"></span>
+                        ${K38.esc(m.league_name)}${m.round ? ' · ' + K38.esc(m.round) : ''}
+                    </span>
+                    ${badge}
+                </div>
+                <div class="card-main">
+                    ${homeTeam}
+                    ${scoreDisplay}
+                    ${awayTeam}
+                </div>
+                ${bottomHtml}
+                ${predictionHtml}
+            </a>
+        `;
+    };
+
+    const renderTeam = (m, side) => {
+        const flag = m[`${side}_flag`] || '';
+        const enName = m[`${side}_team_en`] || m[`${side}_team`] || '';
+        const cnName = m[`${side}_team_cn`] || '';
+
+        const displayName = enName;
+        const secondaryName = cnName && cnName !== enName ? cnName : '';
+
+        return `
+            <div class="card-team ${side}">
+                <div class="team-primary">
+                    ${flag ? `<span class="team-flag">${flag}</span>` : ''}
+                    <span>${K38.esc(displayName)}</span>
+                </div>
+                ${secondaryName ? `<div class="team-secondary">${K38.esc(secondaryName)}</div>` : ''}
+            </div>
+        `;
+    };
+
+    const renderPrediction = (m) => {
+        const p = m.prediction;
+        if (!p || p.insufficient_data) return '';
+
+        const winnerText = p.winner === 'home' ? '主队获胜' : p.winner === 'away' ? '客队获胜' : '平局';
+        const winnerIcon = p.winner === 'home' ? '🏠' : p.winner === 'away' ? '✈️' : '🤝';
+
+        return `
+            <div class="prediction-box">
+                <div>
+                    <span style="font-size: 14px; font-weight: 700; color: var(--text-primary);">
+                        ${winnerIcon} ${winnerText}
+                    </span>
+                    <strong>${p.confidence}%</strong>
+                </div>
+                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">
+                    主 ${p.home_win_prob}% · 平 ${p.draw_prob}% · 客 ${p.away_win_prob}%
+                </div>
+            </div>
+        `;
+    };
+
+    // ═══ Main Load Function ═══
+    const loadMatches = async () => {
         const container = document.getElementById('matchesContainer');
-        container.innerHTML = K38.skeleton(5, 'match');
+        container.innerHTML = K38.skeleton(6);
 
         try {
             const params = new URLSearchParams({
@@ -98,24 +244,21 @@
                 page: currentPage,
                 per_page: perPage
             });
+
             const data = await K38.jsonFetch(`/api/matches?${params}`);
             const matches = data.matches || [];
             const counts = data.counts || {};
 
+            // Update UI
             K38.setStatus(data.is_mock);
-            document.getElementById('heroTotal').textContent = counts.total || data.total || 0;
-            document.getElementById('heroLive').textContent = counts.live || 0;
-            document.getElementById('heroUpcoming').textContent = counts.upcoming || 0;
-            document.getElementById('countAll').textContent = counts.total || 0;
-            document.getElementById('countLive').textContent = counts.live || 0;
-            document.getElementById('countUpcoming').textContent = counts.upcoming || 0;
-            document.getElementById('countFinished').textContent = counts.finished || 0;
+            updateStats(counts);
 
             if (matches.length === 0) {
-                container.innerHTML = K38.empty('暂无比赛数据');
+                container.innerHTML = K38.empty('暂无比赛数据', '⚽');
                 return;
             }
 
+            // Group by date
             const groups = {};
             matches.forEach(m => {
                 const key = K38.dateKey(m.match_date);
@@ -125,162 +268,35 @@
 
             const sorted = Object.entries(groups).sort(([a], [b]) => K38.dateOrder(a) - K38.dateOrder(b));
 
+            // Render
             container.innerHTML = sorted.map(([key, items]) => `
                 <div class="date-group">
-                    <div class="date-header">${K38.dateLabel(key)} <span class="date-count">${items.length} 场</span></div>
-                    <div class="match-cards">${items.map(m => renderMatch(m)).join('')}</div>
+                    <div class="date-header">
+                        <span>${K38.dateLabel(key)}</span>
+                        <span class="date-count">${items.length} 场比赛</span>
+                    </div>
+                    <div class="match-cards">
+                        ${items.map(renderMatch).join('')}
+                    </div>
                 </div>
             `).join('') + K38.pagination(data.pagination, 'loadPage');
 
             K38.animateIn('.match-card', container);
 
-        } catch (e) {
-            container.innerHTML = K38.empty(`加载失败: ${e.message}`, '❌');
+        } catch (error) {
+            container.innerHTML = K38.empty(`加载失败: ${error.message}`, '❌');
         }
-    }
+    };
 
-    function renderMatch(m) {
-        const isLive = m.status_sort <= 2;
-        const isFinished = m.status_sort === 4;
-        const isUpcoming = m.status_sort === 3;
-
-        let badge = '';
-        if (isLive) badge = `<span class="match-badge live"><span class="live-dot"></span> ${m.elapsed || 0}'</span>`;
-        else if (isFinished) badge = `<span class="match-badge finished">FT</span>`;
-        else {
-            const t = K38.formatTime(m.match_date);
-            badge = `<span class="match-badge upcoming">${t}</span>`;
-        }
-
-        let scoreDisplay = '';
-        if (isUpcoming) {
-            scoreDisplay = `
-                <div class="score-upcoming">
-                    <span>VS</span>
-                    <small>${K38.formatTime(m.match_date)}</small>
-                </div>`;
-        } else {
-            const hw = (m.home_goals !== null && m.away_goals !== null && m.home_goals > m.away_goals) ? 'winner' : '';
-            const aw = (m.home_goals !== null && m.away_goals !== null && m.away_goals > m.home_goals) ? 'winner' : '';
-            scoreDisplay = `
-                <div class="score-display">
-                    <span class="score-num home ${hw}">${m.home_goals ?? '?'}</span>
-                    <span class="score-sep">:</span>
-                    <span class="score-num away ${aw}">${m.away_goals ?? '?'}</span>
-                </div>`;
-        }
-
-        const events = (m.events || []).filter(e => e.type === 'Goal').slice(-2);
-        const eventStr = events.map(e => `⚽ ${K38.esc(e.time)}' ${K38.esc(e.player || '')}`).join(' · ');
-        const homeTeam = renderTeam(m, 'home');
-        const awayTeam = renderTeam(m, 'away');
-        const predictionHtml = isUpcoming ? renderPredictionSummary(m) : '';
-
-        return `
-            <a href="/match/${m.fixture_id}" class="match-card ${isLive ? 'card-live' : isFinished ? 'card-finished' : 'card-upcoming'}" style="--accent: ${m.league_color}">
-                <div class="card-top">
-                    <span class="card-league"><span class="league-badge" style="background:${m.league_color}"></span>🏆 ${K38.esc(m.league_name)}${m.round ? ' · ' + K38.esc(m.round) : ''}</span>
-                    ${badge}
-                </div>
-                <div class="card-main">
-                    ${homeTeam}
-                    ${scoreDisplay}
-                    ${awayTeam}
-                </div>
-                <div class="card-bottom">
-                    <span class="card-meta">${m.halftime_home !== null ? 'HT ' + m.halftime_home + ':' + m.halftime_away : ''}${eventStr ? ' · ' + eventStr : ''}</span>
-                    <span class="card-venue">${K38.esc(m.venue || '')}</span>
-                </div>
-                ${predictionHtml}
-            </a>
-        `;
-    }
-
-    function renderPredictionSummary(m) {
-        const p = m.prediction;
-        if (!p || p.insufficient_data) {
-            const corners = renderCornerPrediction(m.corner_prediction);
-            return `
-                <div class="prediction-box prediction-empty">
-                    <div class="prediction-main">暂无足够数据预测</div>
-                    ${corners}
-                </div>
-            `;
-        }
-
-        const winnerSide = p.winner === 'away' ? 'away' : p.winner === 'draw' ? 'draw' : 'home';
-        const winnerName = winnerSide === 'draw' ? '平局' : displayTeamName(m, winnerSide);
-        const factor = (p.factors || [])[0];
-        const statFactor = (p.factors || []).find(item => item.type === 'stat') || factor;
-        const mood = p.prediction_detail || '赛前数据接近';
-        const context = predictionContextLine(m, p);
-        const corners = renderCornerPrediction(m.corner_prediction);
-        return `
-            <div class="prediction-box">
-                <div class="prediction-main">预测 ${K38.esc(winnerName)}${winnerSide === 'draw' ? '' : ' 获胜'} <strong>(${p.confidence}%)</strong></div>
-                ${statFactor ? `<div class="prediction-stat">📊 ${K38.esc(statFactor.text)}</div>` : ''}
-                ${context ? `<div class="prediction-stat">${context}</div>` : ''}
-                ${corners}
-                <div class="prediction-detail">${factorIcon(factor)} ${K38.esc(mood)}</div>
-            </div>
-        `;
-    }
-
-    function renderCornerPrediction(c) {
-        if (!c || !c.first_half || !c.full_time) return '';
-        return `<div class="prediction-stat">🚩 角球：上半场 ${cornerRange(c.first_half)} / 全场 ${cornerRange(c.full_time)}</div>`;
-    }
-
-    function cornerRange(range) {
-        if (range.low === undefined || range.high === undefined) return '待定';
-        return `${range.low}-${range.high}`;
-    }
-
-    function predictionContextLine(m, p) {
-        const h = p.h2h_summary || {};
-        const inj = p.injury_summary || {};
-        const home = K38.shortTeamName(m, 'home');
-        const away = K38.shortTeamName(m, 'away');
-        const h2h = h.total ? `H2H ${home} ${h.home_wins}-${h.away_wins} ${away}` : 'H2H 暂无';
-        const injuries = `伤病 ${home} ${inj.home_count || 0}人/${away} ${inj.away_count || 0}人`;
-        return K38.esc(`${h2h} · ${injuries}`);
-    }
-
-    function displayTeamName(m, side) {
-        const flag = m[`${side}_flag`] || '';
-        const name = m[`${side}_team_en`] || m[`${side}_team`] || '';
-        return `${flag ? flag + ' ' : ''}${name}`;
-    }
-
-    function factorIcon(factor) {
-        if (!factor) return '🟡';
-        if (factor.type === 'positive') return '🟢';
-        if (factor.type === 'negative') return '🔴';
-        return '📈';
-    }
-
-    function renderTeam(m, side) {
-        const rawName = m[`${side}_team`] || '';
-        const cnName = m[`${side}_team_cn`] || '';
-        const enName = m[`${side}_team_en`] || '';
-        const flag = m[`${side}_flag`] || '';
-        const rawIsChinese = K38.hasChinese(rawName);
-        const showFlagLayout = Boolean(flag);
-        const primary = showFlagLayout ? (enName || rawName) : (rawIsChinese ? rawName : (enName || rawName));
-        const secondary = showFlagLayout ? (cnName || (rawIsChinese ? rawName : '')) : (rawIsChinese ? enName : cnName);
-        const flagHtml = showFlagLayout ? `<span class="team-flag">${K38.esc(flag)}</span>` : '';
-        const secondaryHtml = secondary && secondary !== primary
-            ? `<div class="team-secondary">${K38.esc(secondary)}</div>`
-            : '';
-
-        return `
-            <div class="card-team ${side}">
-                <div class="team-primary">${flagHtml}<span>${K38.esc(primary)}</span></div>
-                ${secondaryHtml}
-            </div>
-        `;
-    }
-
+    // ═══ Initialize ═══
+    initFilters();
     loadMatches();
+
+    // Auto-refresh live matches every 30s
+    setInterval(() => {
+        if (currentStatus === 'live' || currentStatus === 'all') {
+            loadMatches();
+        }
+    }, 30000);
 </script>
 {% endblock %}
